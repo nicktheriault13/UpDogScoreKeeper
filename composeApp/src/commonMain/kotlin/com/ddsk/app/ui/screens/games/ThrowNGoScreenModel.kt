@@ -8,8 +8,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 import kotlin.collections.ArrayDeque
 
 private const val MAX_UNDO_LEVELS = 250
@@ -83,6 +81,8 @@ class ThrowNGoScreenModel : ScreenModel {
     val timeLeft = _timeLeft.asStateFlow()
 
     private var timerJob: Job? = null
+
+    private var logCounter = 0
 
     init {
         if (_uiState.value.activeParticipant == null) {
@@ -329,9 +329,11 @@ class ThrowNGoScreenModel : ScreenModel {
     )
 
     private fun logLine(message: String): String {
-        val now = LocalTime.now()
+        // Fallback cross-platform log counter-based timestamp to avoid platform-specific time APIs in commonMain
+        logCounter = (logCounter + 1) % 1_000_000
+        val counterStr = logCounter.toString().padStart(6, '0')
         val participant = _uiState.value.activeParticipant?.displayName ?: "No team"
-        return "[%s] %s - %s".format(now.format(DateTimeFormatter.ofPattern("HH:mm:ss")), participant, message)
+        return "[#%s] %s - %s".format(counterStr, participant, message)
     }
 
     private fun seedParticipants() {

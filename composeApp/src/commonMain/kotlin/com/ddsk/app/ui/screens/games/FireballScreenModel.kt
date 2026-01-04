@@ -8,6 +8,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+data class FireballGridPoint(val row: Int, val col: Int)
+
 data class FireballParticipant(
     val handler: String,
     val dog: String,
@@ -50,29 +52,41 @@ data class FireballScoreBreakdown(
     val allRollers: Boolean = false
 )
 
-private val scoringPoints = setOf(
-    Point(0, 0), Point(0, 1), Point(0, 2),
-    Point(1, 0), Point(1, 1), Point(1, 2),
-    Point(2, 0), Point(2, 1)
-)
-
 private data class BoardSnapshot(
     val nonFireballPoints: Int,
     val fireballPoints: Int,
     val highestZone: Int?
 ) {
-    val total: Int get() = nonFireballPoints + fireballPoints
+    val total: Int
+        get() = nonFireballPoints + fireballPoints
 }
 
 class FireballScreenModel : ScreenModel {
 
+    private operator fun Set<FireballGridPoint>.plus(point: FireballGridPoint): Set<FireballGridPoint> =
+        this.union(setOf(point))
+    private operator fun Set<FireballGridPoint>.minus(point: FireballGridPoint): Set<FireballGridPoint> =
+        this.subtract(setOf(point))
+
+    companion object {
+        val zoneValueGrid: List<List<Int?>> = listOf(
+            listOf(8, 7, 5),
+            listOf(6, 4, 2),
+            listOf(3, 1, null)
+        )
+
+        fun zoneValue(row: Int, col: Int): Int? = zoneValueGrid
+            .getOrNull(row)
+            ?.getOrNull(col)
+    }
+
     private val _totalScore = MutableStateFlow(0)
     val totalScore = _totalScore.asStateFlow()
 
-    private val _clickedZones = MutableStateFlow(emptySet<Point>())
+    private val _clickedZones = MutableStateFlow(emptySet<FireballGridPoint>())
     val clickedZones = _clickedZones.asStateFlow()
 
-    private val _fireballZones = MutableStateFlow(emptySet<Point>())
+    private val _fireballZones = MutableStateFlow(emptySet<FireballGridPoint>())
     val fireballZones = _fireballZones.asStateFlow()
 
     private val _isFireballActive = MutableStateFlow(false)
@@ -104,11 +118,21 @@ class FireballScreenModel : ScreenModel {
     private val _completedParticipants = MutableStateFlow<List<FireballParticipant>>(emptyList())
     val completedParticipants = _completedParticipants.asStateFlow()
 
+    private val _sidebarCollapsed = MutableStateFlow(false)
+    val sidebarCollapsed = _sidebarCollapsed.asStateFlow()
+
+    private val _sidebarMessage = MutableStateFlow("")
+    val sidebarMessage = _sidebarMessage.asStateFlow()
+
     private var countdownJob: Job? = null
     private val _timerSecondsRemaining = MutableStateFlow(0)
     val timerSecondsRemaining = _timerSecondsRemaining.asStateFlow()
     private val _isTimerRunning = MutableStateFlow(false)
     val isTimerRunning = _isTimerRunning.asStateFlow()
+
+    private val scoringPoints: Set<FireballGridPoint> = zoneValueGrid.flatMapIndexed { row, cols ->
+        cols.mapIndexedNotNull { col, value -> value?.let { FireballGridPoint(row, col) } }
+    }.toSet()
 
     init {
         if (_activeParticipant.value == null && _participantsQueue.value.isEmpty()) {
@@ -117,7 +141,7 @@ class FireballScreenModel : ScreenModel {
     }
 
     fun handleZoneClick(row: Int, col: Int) {
-        val point = Point(row, col)
+        val point = FireballGridPoint(row, col)
         val fireballModeActive = _isFireballActive.value
 
         if (point in _clickedZones.value || point in _fireballZones.value) {
@@ -244,7 +268,7 @@ class FireballScreenModel : ScreenModel {
 
     private fun finalizeBoardIfComplete() {
         val covered = _clickedZones.value + _fireballZones.value
-        if (scoringPoints.all { it in covered } && covered.isNotEmpty()) {
+        if (scoringPoints.all { point -> point in covered } && covered.isNotEmpty()) {
             val snapshot = calculateBoardSnapshot(_clickedZones.value, _fireballZones.value)
             _completedBoards.value = _completedBoards.value + snapshot
             _clickedZones.value = emptySet()
@@ -254,8 +278,8 @@ class FireballScreenModel : ScreenModel {
     }
 
     private fun calculateBoardSnapshot(
-        greens: Set<Point>,
-        oranges: Set<Point>
+        greens: Set<FireballGridPoint>,
+        oranges: Set<FireballGridPoint>
     ): BoardSnapshot {
         var nonFireballPoints = 0
         var fireballPoints = 0
@@ -343,19 +367,7 @@ class FireballScreenModel : ScreenModel {
         }
     }
 
-    private fun getPointsForCell(row: Int, col: Int): Int {
-        return when {
-            row == 0 && col == 0 -> 8
-            row == 0 && col == 1 -> 7
-            row == 0 && col == 2 -> 5
-            row == 1 && col == 0 -> 6
-            row == 1 && col == 1 -> 4
-            row == 1 && col == 2 -> 2
-            row == 2 && col == 0 -> 3
-            row == 2 && col == 1 -> 1
-            else -> 0
-        }
-    }
+    private fun getPointsForCell(row: Int, col: Int): Int = zoneValue(row, col) ?: 0
 
     fun startRoundTimer(durationSeconds: Int = 64) {
         countdownJob?.cancel()
@@ -385,6 +397,23 @@ class FireballScreenModel : ScreenModel {
         _timerSecondsRemaining.value = 0
     }
 
+    // Public wrapper used by UI buttons - placeholder implementations
+    fun importParticipants() {
+        // For now, use the sample importer to populate participants when invoked from UI
+        importSampleParticipants()
+    }
+
+    fun exportScores() {
+        // Export current participants as CSV and log to console (UI may provide sharing in the future)
+        val csv = exportParticipantsAsCsv()
+        println("Fireball export CSV size: ${'$'}{csv.length}")
+    }
+
+    fun openHelp() {
+        // Placeholder - UI will open its own help modal; keep method for compatibility
+        println("Fireball help requested")
+    }
+
     private fun importSampleParticipants() {
         val sample = listOf(
             FireballParticipant(handler = "Alex", dog = "Nova", utn = "UDC123"),
@@ -399,6 +428,20 @@ class FireballScreenModel : ScreenModel {
             _participantsQueue.value = sample.drop(1)
         }
         _completedParticipants.value = emptyList()
+        _sidebarMessage.value = "Sample participants loaded"
         resetGame()
+    }
+
+    fun clearParticipantsQueue() {
+        _participantsQueue.value = emptyList()
+        _activeParticipant.value = null
+        _completedParticipants.value = emptyList()
+        _sidebarMessage.value = "Participants cleared"
+        resetGame()
+    }
+
+    fun toggleSidebar() {
+        _sidebarCollapsed.value = !_sidebarCollapsed.value
+        _sidebarMessage.value = if (_sidebarCollapsed.value) "Sidebar collapsed" else "Sidebar expanded"
     }
 }
