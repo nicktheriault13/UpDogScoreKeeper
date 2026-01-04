@@ -30,15 +30,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.koin.getScreenModel
 
 @OptIn(ExperimentalFoundationApi::class)
 object TimeWarpScreen : Screen {
 
     @Composable
     override fun Content() {
-        val screenModel = rememberScreenModel { TimeWarpScreenModel() }
+        val screenModel = getScreenModel<TimeWarpScreenModel>()
         val score by screenModel.score.collectAsState()
         val timeRemaining by screenModel.timeRemaining.collectAsState()
         val isTimerRunning by screenModel.isTimerRunning.collectAsState()
@@ -143,9 +143,7 @@ private fun TimeInputDialog(screenModel: TimeWarpScreenModel, onDismiss: () -> U
             Button(onClick = {
                 screenModel.setTimeManually(timeInput)
                 onDismiss()
-            }) {
-                Text("Set")
-            }
+            }) { Text("Set") }
         },
         dismissButton = {
             Button(onClick = onDismiss) {

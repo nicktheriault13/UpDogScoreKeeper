@@ -25,14 +25,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.koin.getScreenModel
 
 object GreedyScreen : Screen {
 
     @Composable
     override fun Content() {
-        val screenModel = rememberScreenModel { GreedyScreenModel() }
+        val screenModel = getScreenModel<GreedyScreenModel>()
         val score by screenModel.score.collectAsState()
         val throwZone by screenModel.throwZone.collectAsState()
         val misses by screenModel.misses.collectAsState()

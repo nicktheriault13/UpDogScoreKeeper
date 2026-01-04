@@ -43,6 +43,8 @@ import com.ddsk.app.ui.screens.games.FourWayPlayScreen
 import com.ddsk.app.ui.screens.games.FrizgilityScreen
 import com.ddsk.app.ui.screens.games.FunKeyScreen
 import com.ddsk.app.ui.screens.games.GreedyScreen
+import com.ddsk.app.ui.screens.games.FireballScreen
+import com.ddsk.app.ui.screens.games.BoomScreen
 import com.ddsk.app.ui.screens.games.SevenUpScreen
 import com.ddsk.app.ui.screens.games.SpacedOutScreen
 import com.ddsk.app.ui.screens.games.ThrowNGoScreen
@@ -103,6 +105,8 @@ private class UpDogGamesScreen : Screen {
                             "Funkey L1" -> navigator.push(FunKeyScreen)
                             "Frizgility L1" -> navigator.push(FrizgilityScreen)
                             "Greedy" -> navigator.push(GreedyScreen)
+                            "Fireball" -> navigator.push(FireballScreen)
+                            "Boom!" -> navigator.push(BoomScreen)
                             else -> navigator.push(GameScreen(gameName))
                         }
                     },

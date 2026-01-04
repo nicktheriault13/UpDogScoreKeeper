@@ -62,6 +62,9 @@ kotlin {
                 implementation(libs.androidx.appcompat)
                 implementation(libs.androidx.core.ktx)
             }
+            languageSettings {
+                optIn("androidx.compose.foundation.layout.ExperimentalLayoutApi")
+            }
         }
         val desktopMain by getting {
             dependencies {

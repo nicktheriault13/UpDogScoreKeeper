@@ -2,59 +2,172 @@ package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.max
 
 class FourWayPlayScreenModel : ScreenModel {
 
-    private val _score = MutableStateFlow(0)
-    val score = _score.asStateFlow()
+    data class Participant(
+        val handler: String,
+        val dog: String,
+        val utn: String,
+        val hasScore: Boolean = false,
+    )
 
-    private val _clickedZones = MutableStateFlow(emptySet<Int>())
-    val clickedZones = _clickedZones.asStateFlow()
+    private data class Snapshot(
+        val score: Int,
+        val quads: Int,
+        val clickedZones: Set<Int>,
+        val sweetSpot: Boolean,
+        val misses: Int,
+    )
+
+    private val _score = MutableStateFlow(0)
+    val score: StateFlow<Int> = _score.asStateFlow()
+
+    private val _clickedZones = MutableStateFlow(setOf<Int>())
+    val clickedZones: StateFlow<Set<Int>> = _clickedZones.asStateFlow()
 
     private val _sweetSpotClicked = MutableStateFlow(false)
-    val sweetSpotClicked = _sweetSpotClicked.asStateFlow()
+    val sweetSpotClicked: StateFlow<Boolean> = _sweetSpotClicked.asStateFlow()
 
     private val _fieldFlipped = MutableStateFlow(false)
-    val fieldFlipped = _fieldFlipped.asStateFlow()
+    val fieldFlipped: StateFlow<Boolean> = _fieldFlipped.asStateFlow()
 
     private val _quads = MutableStateFlow(0)
-    val quads = _quads.asStateFlow()
+    val quads: StateFlow<Int> = _quads.asStateFlow()
 
-    fun handleZoneClick(zone: Int) {
-        if (zone !in _clickedZones.value) {
-            _score.value += zone
-            val newZones = _clickedZones.value + zone
+    private val _misses = MutableStateFlow(0)
+    val misses: StateFlow<Int> = _misses.asStateFlow()
 
-            if (newZones.size == 4) {
-                // Quad completed
-                _quads.value++
-                _clickedZones.value = emptySet() // Reset for the next quad
-            } else {
-                _clickedZones.value = newZones
-            }
+    private val _allRollers = MutableStateFlow(false)
+    val allRollers: StateFlow<Boolean> = _allRollers.asStateFlow()
+
+    private val _sidebarCollapsed = MutableStateFlow(false)
+    val sidebarCollapsed: StateFlow<Boolean> = _sidebarCollapsed.asStateFlow()
+
+    private val _participants = MutableStateFlow(
+        listOf(
+            Participant("Alex Vega", "Bolt", "UTN-001"),
+            Participant("Jamie Reed", "Skye", "UTN-002"),
+            Participant("Morgan Lee", "Nova", "UTN-003"),
+            Participant("Harper Quinn", "Echo", "UTN-004"),
+        )
+    )
+    val participants: StateFlow<List<Participant>> = _participants.asStateFlow()
+
+    private val _lastSidebarAction = MutableStateFlow("Ready for actions")
+    val lastSidebarAction: StateFlow<String> = _lastSidebarAction.asStateFlow()
+
+    private val undoStack = ArrayDeque<Snapshot>()
+    private val snapshotLimit = 50
+
+    fun handleZoneClick(zoneValue: Int) {
+        if (zoneValue in _clickedZones.value) return
+        pushSnapshot()
+        _score.value += zoneValue
+        val updatedZones = _clickedZones.value + zoneValue
+        if (updatedZones.size == 4) {
+            _quads.value += 1
+            _clickedZones.value = emptySet()
+        } else {
+            _clickedZones.value = updatedZones
         }
     }
 
     fun handleSweetSpotClick() {
-        // Toggle the sweet spot state and adjust score accordingly
-        if (!_sweetSpotClicked.value) {
-            _score.value += 2
-            _sweetSpotClicked.value = true
-        } else {
+        pushSnapshot()
+        if (_sweetSpotClicked.value) {
             _score.value -= 2
-            _sweetSpotClicked.value = false
+        } else {
+            _score.value += 2
         }
+        _sweetSpotClicked.value = !_sweetSpotClicked.value
+    }
+
+    fun registerMiss() {
+        pushSnapshot()
+        _misses.value = max(0, _misses.value + 1)
     }
 
     fun flipField() {
         _fieldFlipped.value = !_fieldFlipped.value
     }
 
-    fun reset() {
+    fun resetScoring() {
+        pushSnapshot()
         _score.value = 0
         _clickedZones.value = emptySet()
         _sweetSpotClicked.value = false
         _quads.value = 0
+        _misses.value = 0
+    }
+
+    fun toggleAllRollers() {
+        _allRollers.value = !_allRollers.value
+    }
+
+    fun toggleSidebar() {
+        _sidebarCollapsed.value = !_sidebarCollapsed.value
+    }
+
+    fun addParticipant(handler: String, dog: String, utn: String) {
+        _participants.value = _participants.value + Participant(handler, dog, utn)
+        recordSidebarAction("Added $handler & $dog")
+    }
+
+    fun clearParticipants() {
+        _participants.value = emptyList()
+        recordSidebarAction("Participants cleared")
+    }
+
+    fun moveToNextParticipant() {
+        if (_participants.value.size <= 1) return
+        val current = _participants.value.first()
+        _participants.value = _participants.value.drop(1) + current
+        recordSidebarAction("Next participant")
+    }
+
+    fun moveToPreviousParticipant() {
+        if (_participants.value.size <= 1) return
+        val list = _participants.value
+        val last = list.last()
+        _participants.value = listOf(last) + list.dropLast(1)
+        recordSidebarAction("Previous participant")
+    }
+
+    fun skipParticipant() {
+        moveToNextParticipant()
+        recordSidebarAction("Participant skipped")
+    }
+
+    fun recordSidebarAction(label: String) {
+        _lastSidebarAction.value = label
+    }
+
+    fun undo() {
+        val snapshot = undoStack.removeFirstOrNull() ?: return
+        _score.value = snapshot.score
+        _quads.value = snapshot.quads
+        _clickedZones.value = snapshot.clickedZones
+        _sweetSpotClicked.value = snapshot.sweetSpot
+        _misses.value = snapshot.misses
+        _lastSidebarAction.value = "Undo applied"
+    }
+
+    private fun pushSnapshot() {
+        undoStack.addFirst(
+            Snapshot(
+                score = _score.value,
+                quads = _quads.value,
+                clickedZones = _clickedZones.value,
+                sweetSpot = _sweetSpotClicked.value,
+                misses = _misses.value,
+            )
+        )
+        if (undoStack.size > snapshotLimit) {
+            undoStack.removeLast()
+        }
     }
 }
