@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,18 +20,22 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Card
 import androidx.compose.material.Divider
 import androidx.compose.material.MaterialTheme
-import androidx.compose.material.Surface
+import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Text
+import androidx.compose.material.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,97 +46,138 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.koin.getScreenModel
+import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
+import kotlinx.coroutines.launch
 
 object FourWayPlayScreen : Screen {
-
     @Composable
     override fun Content() {
-        val screenModel = getScreenModel<FourWayPlayScreenModel>()
+        val screenModel = rememberScreenModel { FourWayPlayScreenModel() }
         val score by screenModel.score.collectAsState()
         val quads by screenModel.quads.collectAsState()
+        val misses by screenModel.misses.collectAsState()
+
+        var timerRunning by remember { mutableStateOf(false) }
+        var secondsRemaining by remember { mutableStateOf(60) }
+
+        val participants by screenModel.participants.collectAsState()
+        val sidebarCollapsed by screenModel.sidebarCollapsed.collectAsState()
+        val fieldFlipped by screenModel.fieldFlipped.collectAsState()
         val clickedZones by screenModel.clickedZones.collectAsState()
         val sweetSpot by screenModel.sweetSpotClicked.collectAsState()
-        val fieldFlipped by screenModel.fieldFlipped.collectAsState()
-        val misses by screenModel.misses.collectAsState()
         val allRollers by screenModel.allRollers.collectAsState()
-        val sidebarCollapsed by screenModel.sidebarCollapsed.collectAsState()
-        val participants by screenModel.participants.collectAsState()
         val sidebarMessage by screenModel.lastSidebarAction.collectAsState()
-        var timerRunning by remember { mutableStateOf(false) }
-        var timerSeconds by remember { mutableStateOf(60) }
 
-        Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                HeaderRow(
-                    timerRunning = timerRunning,
-                    secondsRemaining = timerSeconds,
-                    onTimerToggle = {
-                        timerRunning = !timerRunning
-                        screenModel.recordSidebarAction(if (timerRunning) "Timer stopped" else "Timer started")
-                    },
-                    participants = participants,
-                    score = score,
-                    quads = quads,
-                    misses = misses,
-                    onMiss = screenModel::registerMiss,
-                )
+        var showAddParticipant by remember { mutableStateOf(false) }
+        var handlerInput by remember { mutableStateOf("") }
+        var dogInput by remember { mutableStateOf("") }
+        var utnInput by remember { mutableStateOf("") }
 
-                Spacer(Modifier.height(16.dp))
+        val scope = rememberCoroutineScope()
 
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val spacing = 12.dp
-                    val sidebarWidth = if (sidebarCollapsed) 68.dp else 190.dp
-                    val participantWidth = 220.dp
-                    val minFieldWidth = 200.dp
-                    val availableFieldWidth = (maxWidth - sidebarWidth - participantWidth - (spacing * 2)).coerceAtLeast(minFieldWidth)
-                    val fieldHeight = (availableFieldWidth / 1.2f).coerceAtLeast(320.dp)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(spacing),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        SidebarColumn(
-                            collapsed = sidebarCollapsed,
-                            onToggle = screenModel::toggleSidebar,
-                            onImport = { screenModel.recordSidebarAction("Import tapped") },
-                            onExport = { screenModel.recordSidebarAction("Export tapped") },
-                            onLog = { screenModel.recordSidebarAction("Log tapped") },
-                            onAddTeam = { screenModel.addParticipant("New Handler", "Dog", "UTN") },
-                            onHelp = { screenModel.recordSidebarAction("Help opened") },
-                            onReset = screenModel::resetScoring,
-                            onFlipField = screenModel::flipField,
-                            onPrevious = screenModel::moveToPreviousParticipant,
-                            onNext = screenModel::moveToNextParticipant,
-                            onSkip = screenModel::skipParticipant,
-                            onAllRollers = screenModel::toggleAllRollers,
-                            onUndo = screenModel::undo,
-                            allRollersEnabled = allRollers,
-                            sidebarMessage = sidebarMessage,
-                        )
-
-                        ParticipantPanel(
-                            participants = participants,
-                            height = fieldHeight,
-                            onSelect = { screenModel.recordSidebarAction("Viewing ${it.handler}") },
-                        )
-
-                        FieldGrid(
-                            fieldFlipped = fieldFlipped,
-                            clickedZones = clickedZones,
-                            sweetSpot = sweetSpot,
-                            allRollers = allRollers,
-                            onZoneClick = screenModel::handleZoneClick,
-                            onSweetSpotClick = screenModel::handleSweetSpotClick,
-                            modifier = Modifier
-                                .width(availableFieldWidth)
-                                .height(fieldHeight)
-                        )
-                    }
+        val filePicker = rememberFilePicker { result ->
+            scope.launch {
+                when (result) {
+                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
+                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
+                    else -> {}
                 }
             }
+        }
+
+        val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("4-Way Play") })
+
+        LaunchedEffect(timerRunning) {
+            if (!timerRunning) {
+                audioPlayer.stop()
+            } else {
+                audioPlayer.play()
+            }
+        }
+
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val spacing = 12.dp
+            val sidebarWidth = if (sidebarCollapsed) 68.dp else 190.dp
+            val participantWidth = 220.dp
+            val minFieldWidth = 200.dp
+            val availableFieldWidth = (maxWidth - sidebarWidth - participantWidth - (spacing * 2)).coerceAtLeast(minFieldWidth)
+            val fieldHeight = (availableFieldWidth / 1.2f).coerceAtLeast(320.dp)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+                verticalAlignment = Alignment.Top
+            ) {
+                SidebarColumn(
+                    collapsed = sidebarCollapsed,
+                    onToggle = screenModel::toggleSidebar,
+                    onImport = { filePicker.launch() },
+                    onExport = { screenModel.recordSidebarAction("Export tapped") },
+                    onLog = { screenModel.recordSidebarAction("Log tapped") },
+                    onAddTeam = { showAddParticipant = true },
+                    onHelp = { screenModel.recordSidebarAction("Help opened") },
+                    onReset = screenModel::resetScoring,
+                    onFlipField = screenModel::flipField,
+                    onPrevious = screenModel::moveToPreviousParticipant,
+                    onNext = screenModel::moveToNextParticipant,
+                    onSkip = screenModel::skipParticipant,
+                    onAllRollers = screenModel::toggleAllRollers,
+                    onUndo = screenModel::undo,
+                    allRollersEnabled = allRollers,
+                    sidebarMessage = sidebarMessage,
+                )
+
+                ParticipantPanel(
+                    participants = participants,
+                    height = fieldHeight,
+                    onSelect = { screenModel.recordSidebarAction("Viewing ${it.handler}") },
+                )
+
+                FieldGrid(
+                    fieldFlipped = fieldFlipped,
+                    clickedZones = clickedZones,
+                    sweetSpot = sweetSpot,
+                    allRollers = allRollers,
+                    onZoneClick = screenModel::handleZoneClick,
+                    onSweetSpotClick = screenModel::handleSweetSpotClick,
+                    modifier = Modifier
+                        .width(availableFieldWidth)
+                        .height(fieldHeight)
+                )
+            }
+        }
+
+        if (showAddParticipant) {
+            AlertDialog(
+                onDismissRequest = { showAddParticipant = false },
+                title = { Text("Add Team") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(value = handlerInput, onValueChange = { handlerInput = it }, label = { Text("Handler") })
+                        OutlinedTextField(value = dogInput, onValueChange = { dogInput = it }, label = { Text("Dog") })
+                        OutlinedTextField(value = utnInput, onValueChange = { utnInput = it }, label = { Text("UTN") })
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        screenModel.addParticipant(handlerInput, dogInput, utnInput)
+                        handlerInput = ""
+                        dogInput = ""
+                        utnInput = ""
+                        showAddParticipant = false
+                    }) {
+                        Text("Add")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showAddParticipant = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }

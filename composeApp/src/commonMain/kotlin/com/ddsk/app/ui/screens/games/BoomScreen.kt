@@ -17,20 +17,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Card
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
+import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,8 +41,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.koin.getScreenModel
+import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
+import kotlinx.coroutines.launch
 
 private val successGreen = Color(0xFF00C853)
 private val warningOrange = Color(0xFFFF9100)
@@ -70,96 +75,95 @@ private fun scoringPaletteFor(button: BoomScoringButton, clicked: Boolean, enabl
 }
 
 object BoomScreen : Screen {
-
     @Composable
     override fun Content() {
-        val screenModel = getScreenModel<BoomScreenModel>()
+        val screenModel = rememberScreenModel { BoomScreenModel() }
         val uiState by screenModel.uiState.collectAsState()
         val timerRunning by screenModel.timerRunning.collectAsState()
         val timeLeft by screenModel.timeLeft.collectAsState()
-
         val dialogState = remember { mutableStateOf<BoomDialogState>(BoomDialogState.None) }
-        val activeDialog = dialogState.value
+        val activeDialog by dialogState
         var csvBuffer by remember { mutableStateOf("") }
+        val scope = rememberCoroutineScope()
 
-        if (activeDialog == BoomDialogState.Import) {
-            CsvImportDialog(
-                csvText = csvBuffer,
-                onTextChange = { csvBuffer = it },
-                onDismiss = {
-                    dialogState.value = BoomDialogState.None
-                    csvBuffer = ""
-                },
-                onConfirm = {
-                    screenModel.importParticipantsFromCsv(csvBuffer)
-                    csvBuffer = ""
-                    dialogState.value = BoomDialogState.None
-                }
-            )
-        }
-
-        if (activeDialog == BoomDialogState.Export) {
-            CsvExportDialog(
-                csvText = csvBuffer,
-                onDismiss = {
-                    dialogState.value = BoomDialogState.None
-                    csvBuffer = ""
-                }
-            )
-        }
-
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val columnSpacing = 16.dp
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(columnSpacing),
-                horizontalArrangement = Arrangement.spacedBy(columnSpacing)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .weight(2f)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(columnSpacing)
-                ) {
-                    ScoreSummaryCard(uiState)
-                    Box(modifier = Modifier.weight(1f)) {
-                        BoomGrid(
-                            screenModel = screenModel,
-                            uiState = uiState,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    ControlRow(screenModel = screenModel)
-                }
-
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(columnSpacing)
-                ) {
-                    TimerCard(
-                        timerRunning = timerRunning,
-                        timeLeft = timeLeft,
-                        onStartStop = {
-                            if (timerRunning) screenModel.stopTimer() else screenModel.startTimer(duration = 60)
-                        },
-                        onReset = screenModel::resetTimer
-                    )
-                    ParticipantQueueCard(uiState = uiState)
-                    ImportExportCard(
-                        onImportClick = {
-                            csvBuffer = ""
-                            dialogState.value = BoomDialogState.Import
-                        },
-                        onExportClick = {
-                            csvBuffer = screenModel.exportParticipantsAsCsv()
-                            dialogState.value = BoomDialogState.Export
-                        }
-                    )
+        val filePicker = rememberFilePicker { result ->
+            scope.launch {
+                when (result) {
+                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
+                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
+                    else -> {}
                 }
             }
+        }
+
+        val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Boom") })
+
+        LaunchedEffect(timerRunning) {
+            if (timerRunning) {
+                audioPlayer.play()
+            } else {
+                audioPlayer.stop()
+            }
+        }
+
+        Surface(modifier = Modifier.fillMaxSize()) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val columnSpacing = 16.dp
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(columnSpacing),
+                    horizontalArrangement = Arrangement.spacedBy(columnSpacing)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(2f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                    ) {
+                        ScoreSummaryCard(uiState)
+                        Box(modifier = Modifier.weight(1f)) {
+                            BoomGrid(
+                                screenModel = screenModel,
+                                uiState = uiState,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        ControlRow(screenModel = screenModel)
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                    ) {
+                        TimerCard(
+                            timerRunning = timerRunning,
+                            timeLeft = timeLeft,
+                            onStartStop = {
+                                if (timerRunning) screenModel.stopTimer() else screenModel.startTimer(duration = 60)
+                            },
+                            onReset = screenModel::resetTimer
+                        )
+                        ParticipantQueueCard(uiState = uiState)
+                        ImportExportCard(
+                            onImportClick = { filePicker.launch() },
+                            onExportClick = {
+                                csvBuffer = screenModel.exportParticipantsAsCsv()
+                                dialogState.value = BoomDialogState.Export
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (activeDialog is BoomDialogState.Export) {
+            CsvExportDialog(
+                csvText = csvBuffer,
+                onDismiss = { dialogState.value = BoomDialogState.None }
+            )
         }
     }
 }
@@ -398,7 +402,7 @@ private fun ImportExportCard(onImportClick: () -> Unit, onExportClick: () -> Uni
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(text = "Participants", style = MaterialTheme.typography.h6)
             Button(onClick = onImportClick, modifier = Modifier.fillMaxWidth()) {
-                Text("Import CSV")
+                Text("Import")
             }
             Button(onClick = onExportClick, modifier = Modifier.fillMaxWidth()) {
                 Text("Export CSV")
@@ -408,45 +412,18 @@ private fun ImportExportCard(onImportClick: () -> Unit, onExportClick: () -> Uni
 }
 
 @Composable
-private fun CsvImportDialog(csvText: String, onTextChange: (String) -> Unit, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Import Participants") },
-        text = {
-            Column {
-                Text("Paste CSV data with handler,dog,utn columns.")
-                Spacer(modifier = Modifier.heightIn(min = 8.dp))
-                OutlinedTextField(
-                    value = csvText,
-                    onValueChange = onTextChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = false,
-                    maxLines = 8
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm, enabled = csvText.isNotBlank()) {
-                Text("Import")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
 private fun CsvExportDialog(csvText: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Export Participants") },
         text = {
-            SelectionContainer {
-                Text(csvText.ifBlank { "No data available." })
-            }
+            OutlinedTextField(
+                value = csvText,
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 8
+            )
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {

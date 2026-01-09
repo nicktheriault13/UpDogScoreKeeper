@@ -6,9 +6,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.time.TimeSource
+
+data class SevenUpParticipant(
+    val handler: String,
+    val dog: String,
+    val utn: String
+)
 
 class SevenUpScreenModel : ScreenModel {
 
@@ -45,6 +52,12 @@ class SevenUpScreenModel : ScreenModel {
     val timeRemaining = _timeRemaining.asStateFlow()
     private val _isTimerRunning = MutableStateFlow(false)
     val isTimerRunning = _isTimerRunning.asStateFlow()
+
+    private val _activeParticipant = MutableStateFlow<SevenUpParticipant?>(null)
+    val activeParticipant = _activeParticipant.asStateFlow()
+
+    private val _participantQueue = MutableStateFlow<List<SevenUpParticipant>>(emptyList())
+    val participantQueue = _participantQueue.asStateFlow()
 
     private var timerJob: Job? = null
     private var startTimeMark: TimeSource.Monotonic.ValueTimeMark? = null
@@ -137,5 +150,24 @@ class SevenUpScreenModel : ScreenModel {
         _timeRemaining.value = 60.0f
         timerJob?.cancel()
         _isTimerRunning.value = false
+    }
+
+    fun importParticipantsFromCsv(csvText: String) {
+        val imported = parseCsv(csvText)
+        val players = imported.map { SevenUpParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players)
+    }
+
+    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
+        val imported = parseXlsx(xlsxData)
+        val players = imported.map { SevenUpParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players)
+    }
+
+    private fun applyImportedPlayers(players: List<SevenUpParticipant>) {
+        if (players.isEmpty()) return
+        _participantQueue.value = players.drop(1)
+        _activeParticipant.value = players.first()
+        reset()
     }
 }

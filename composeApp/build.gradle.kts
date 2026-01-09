@@ -1,11 +1,14 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.gradle.api.file.DuplicatesStrategy
 import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
+import kotlinx.coroutines.launch
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.jetbrainsCompose)
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 kotlin {
@@ -40,7 +43,9 @@ kotlin {
                 implementation(compose.ui)
                 implementation(compose.components.resources)
                 implementation(compose.components.uiToolingPreview)
-                
+                implementation(libs.kotlinx.serialization.json)
+                implementation(libs.kotlinx.datetime)
+
                 // Voyager
                 implementation(libs.voyager.navigator)
                 implementation(libs.voyager.screenModel)
@@ -56,11 +61,21 @@ kotlin {
                 implementation(libs.firebase.auth)
             }
         }
+        val commonTest by getting {
+            dependencies {
+                implementation(libs.kotlin.test)
+            }
+        }
         val androidMain by getting {
             dependencies {
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.androidx.appcompat)
                 implementation(libs.androidx.core.ktx)
+                implementation(platform("com.google.firebase:firebase-bom:32.8.1"))
+                implementation("com.google.firebase:firebase-auth-ktx")
+                implementation("com.google.firebase:firebase-common-ktx")
+                implementation("org.apache.poi:poi:5.2.5")
+                implementation("org.apache.poi:poi-ooxml:5.2.5")
             }
             languageSettings {
                 optIn("androidx.compose.foundation.layout.ExperimentalLayoutApi")
@@ -82,15 +97,16 @@ android {
     namespace = "com.ddsk.app"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
-    sourceSets {
-        getByName("main") {
-            resources.srcDirs("src/commonMain/resources")
-        }
-    }
+    // sourceSets {
+    //     getByName("main") {
+    //         resources.srcDirs("src/commonMain/resources")
+    //         assets.srcDirs("src/commonMain/resources/assets")
+    //     }
+    // }
 
     defaultConfig {
         applicationId = "com.ddsk.app"
-        minSdk = libs.versions.android.minSdk.get().toInt()
+        minSdk = 26
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "1.0"
@@ -123,4 +139,8 @@ compose.desktop {
             packageVersion = "1.0.0"
         }
     }
+}
+
+tasks.withType<Copy>().configureEach {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

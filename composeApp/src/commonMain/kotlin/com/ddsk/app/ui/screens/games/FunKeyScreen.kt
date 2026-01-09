@@ -17,28 +17,73 @@ import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
+import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
+import kotlinx.coroutines.launch
 
 object FunKeyScreen : Screen {
-
     @Composable
     override fun Content() {
         val screenModel = rememberScreenModel { FunKeyScreenModel() }
         val score by screenModel.score.collectAsState()
-        val isPurpleEnabled by screenModel.isPurpleEnabled.collectAsState()
-        val isBlueEnabled by screenModel.isBlueEnabled.collectAsState()
+
+        var isTimerRunning by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+
+        val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Fun Key") })
+
+        LaunchedEffect(isTimerRunning) {
+            if (isTimerRunning) {
+                audioPlayer.play()
+            } else {
+                audioPlayer.stop()
+            }
+        }
 
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Add Timer Button
+            Button(onClick = { isTimerRunning = !isTimerRunning }) {
+                Text(if (isTimerRunning) "Stop Timer" else "Start Timer")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Add Import functionality
+            val filePicker = rememberFilePicker { result ->
+                scope.launch {
+                    when (result) {
+                        is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
+                        is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
+                        else -> {}
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Button(onClick = { filePicker.launch() }) { Text("Import") }
+                Button(onClick = { /* Export placeholder */ }) { Text("Export") }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             Text("Score: $score", style = MaterialTheme.typography.h4)
 
             Spacer(modifier = Modifier.height(32.dp))

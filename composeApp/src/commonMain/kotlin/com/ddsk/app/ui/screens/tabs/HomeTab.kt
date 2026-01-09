@@ -45,10 +45,12 @@ import com.ddsk.app.ui.screens.games.FunKeyScreen
 import com.ddsk.app.ui.screens.games.GreedyScreen
 import com.ddsk.app.ui.screens.games.FireballScreen
 import com.ddsk.app.ui.screens.games.BoomScreen
+import com.ddsk.app.ui.screens.games.FarOutScreen
 import com.ddsk.app.ui.screens.games.SevenUpScreen
 import com.ddsk.app.ui.screens.games.SpacedOutScreen
 import com.ddsk.app.ui.screens.games.ThrowNGoScreen
 import com.ddsk.app.ui.screens.games.TimeWarpScreen
+import com.ddsk.app.ui.screens.timers.TimersScreen
 import kotlinx.coroutines.flow.map
 
 private enum class PlayerState { Stopped, Playing, Paused }
@@ -77,7 +79,7 @@ object HomeTab : Tab {
 }
 
 private val updogGames = listOf(
-    "Time Warp L1", "Throw N Go L1", "Spaced Out L1", "4 Way Play", "Far Out",
+    "Timers", "Time Warp L1", "Throw N Go L1", "Spaced Out L1", "4 Way Play", "Far Out",
     "Greedy", "Boom!", "Fireball", "Funkey L1", "7 Up", "Frizgility L1"
 )
 
@@ -97,12 +99,14 @@ private class UpDogGamesScreen : Screen {
                 Button(
                     onClick = {
                         when (gameName) {
+                            "Timers" -> navigator.push(TimersScreen)
                             "Time Warp L1" -> navigator.push(TimeWarpScreen)
                             "Throw N Go L1" -> navigator.push(ThrowNGoScreen)
                             "4 Way Play" -> navigator.push(FourWayPlayScreen)
                             "Spaced Out L1" -> navigator.push(SpacedOutScreen)
                             "7 Up" -> navigator.push(SevenUpScreen)
                             "Funkey L1" -> navigator.push(FunKeyScreen)
+                            "Far Out" -> navigator.push(FarOutScreen)
                             "Frizgility L1" -> navigator.push(FrizgilityScreen)
                             "Greedy" -> navigator.push(GreedyScreen)
                             "Fireball" -> navigator.push(FireballScreen)

@@ -51,26 +51,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
+import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
+import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
-import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
-
-// Removed duplicate expect declaration; rely on shared expect in ReadBinaryFile.common.kt
-
-private fun resolveXlsxInput(rawInput: String): ByteArray? {
-    val trimmed = rawInput.trim().trim('"')
-    if (trimmed.isEmpty()) return null
-    decodeBase64OrNull(trimmed)?.let { return it }
-    return readBinaryFile(trimmed)
-}
-
-@OptIn(ExperimentalEncodingApi::class)
-private fun decodeBase64OrNull(raw: String): ByteArray? = runCatching {
-    val trimmed = raw.trim().let { content ->
-        if (content.contains(",")) content.substringAfterLast(",") else content
-    }
-    Base64.decode(trimmed.filterNot(Char::isWhitespace))
-}.getOrNull()
 
 object SpacedOutScreen : Screen {
 
@@ -100,13 +84,28 @@ object SpacedOutScreen : Screen {
         var dogInput by remember { mutableStateOf("") }
         var utnInput by remember { mutableStateOf("") }
 
-        var showImport by remember { mutableStateOf(false) }
-        var importBuffer by remember { mutableStateOf("") }
-        var importMode by remember { mutableStateOf(ImportMode.CSV) }
-        var importError by remember { mutableStateOf<String?>(null) }
-
         var exportBuffer by remember { mutableStateOf<String?>(null) }
         var logBuffer by remember { mutableStateOf<String?>(null) }
+
+        val filePicker = rememberFilePicker { result ->
+            scope.launch {
+                when (result) {
+                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
+                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
+                    else -> {}
+                }
+            }
+        }
+
+        val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Spaced Out") })
+
+        LaunchedEffect(timerRunning) {
+            if (timerRunning) {
+                audioPlayer.play()
+            } else {
+                audioPlayer.stop()
+            }
+        }
 
         Surface(color = MaterialTheme.colors.background) {
             Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -137,12 +136,7 @@ object SpacedOutScreen : Screen {
                         onFlipField = screenModel::flipField,
                         onReset = screenModel::reset,
                         onAddTeam = { showAddParticipant = true },
-                        onImport = {
-                            importMode = ImportMode.CSV
-                            importBuffer = ""
-                            importError = null
-                            showImport = true
-                        },
+                        onImport = { filePicker.launch() },
                         onExport = { exportBuffer = screenModel.exportParticipantsAsCsv() },
                         onExportLog = { logBuffer = screenModel.exportLog() },
                         onNext = screenModel::nextParticipant,
@@ -191,47 +185,6 @@ object SpacedOutScreen : Screen {
                     dogInput = ""
                     utnInput = ""
                     showAddParticipant = false
-                }
-            )
-        }
-
-        if (showImport) {
-            ImportDialog(
-                mode = importMode,
-                text = importBuffer,
-                errorMessage = importError,
-                onTextChange = {
-                    importBuffer = it
-                    importError = null
-                },
-                onModeChange = { mode ->
-                    importMode = mode
-                    importBuffer = ""
-                    importError = null
-                },
-                onDismiss = {
-                    showImport = false
-                    importBuffer = ""
-                    importError = null
-                },
-                onConfirm = {
-                    when (importMode) {
-                        ImportMode.CSV -> {
-                            screenModel.importParticipantsFromCsv(importBuffer)
-                            showImport = false
-                            importBuffer = ""
-                        }
-                        ImportMode.XLSX -> {
-                            val bytes = resolveXlsxInput(importBuffer)
-                            if (bytes == null) {
-                                importError = "Enter a valid file path or Base64 XLSX payload"
-                                return@ImportDialog
-                            }
-                            screenModel.importParticipantsFromXlsx(bytes)
-                            showImport = false
-                            importBuffer = ""
-                        }
-                    }
                 }
             )
         }
@@ -488,54 +441,6 @@ private fun ParticipantDialog(
 }
 
 @Composable
-private fun ImportDialog(
-    mode: ImportMode,
-    text: String,
-    errorMessage: String?,
-    onTextChange: (String) -> Unit,
-    onModeChange: (ImportMode) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Import Participants") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ImportMode.values().forEach { option ->
-                        Button(
-                            onClick = { onModeChange(option) },
-                            colors = ButtonDefaults.buttonColors(
-                                backgroundColor = if (option == mode) MaterialTheme.colors.primary else MaterialTheme.colors.secondary
-                            )
-                        ) {
-                            Text(option.label)
-                        }
-                    }
-                }
-                val labelText = if (mode == ImportMode.CSV) "Paste CSV (handler,dog,utn)" else "Enter XLSX file path or Base64 data"
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    modifier = Modifier.fillMaxWidth().height(200.dp),
-                    label = { Text(labelText) }
-                )
-                errorMessage?.let { Text(it, color = Color(0xFFD32F2F), fontSize = 12.sp) }
-                if (mode == ImportMode.XLSX) {
-                    Text(
-                        text = "Tip: you can paste a Base64 data URI or provide an absolute file path to the .xlsx file.",
-                        style = MaterialTheme.typography.caption
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Import") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
-
-@Composable
 private fun TextPreviewDialog(title: String, text: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -583,16 +488,20 @@ private fun ScoringGrid(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
-                                    .border(0.5.dp, MaterialTheme.colors.onSurface),
+                                    .border(0.5.dp, MaterialTheme.colors.onSurface)
+                                    .background(
+                                        if (clickedZones.contains(zone)) MaterialTheme.colors.secondary else MaterialTheme.colors.surface
+                                    )
+                                    .clickable(enabled = zone != null) {
+                                        if (zone != null) screenModel.handleZoneClick(zone)
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (zone != null) {
-                                    ZoneButton(
-                                        zone = zone,
-                                        clickedZones = clickedZones,
-                                        label = screenModel.zoneLabel(zone),
-                                        points = screenModel.zonePoints(zone),
-                                        onClick = { screenModel.handleZoneClick(zone) }
+                                    Text(
+                                        text = zone.label,
+                                        style = MaterialTheme.typography.h6,
+                                        color = if (clickedZones.contains(zone)) MaterialTheme.colors.onSecondary else MaterialTheme.colors.onSurface
                                     )
                                 }
                             }
@@ -604,50 +513,39 @@ private fun ScoringGrid(
     }
 }
 
-@Composable
-private fun ZoneButton(
-    zone: SpacedOutZone,
-    clickedZones: Set<SpacedOutZone>,
-    label: String,
-    points: Int,
-    onClick: () -> Unit
-) {
-    val isClicked = zone in clickedZones
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(if (isClicked) Color(0xFF2E7D32) else MaterialTheme.colors.secondary)
-            .clickable { onClick() }
-            .padding(6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(text = label, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-        Text(text = "+$points", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-    }
-}
-
-@Composable
-private fun SweetSpotBonusButton(isOn: Boolean, onToggle: () -> Unit) {
-    Button(
-        onClick = onToggle,
-        colors = ButtonDefaults.buttonColors(backgroundColor = if (isOn) Color(0xFF2E7D32) else MaterialTheme.colors.primary),
-        modifier = Modifier.fillMaxWidth(0.5f)
-    ) {
-        Text(if (isOn) "SweetSpot Bonus Active" else "Activate SweetSpot Bonus")
-    }
-}
-
 private fun getZoneForCell(row: Int, col: Int): SpacedOutZone? {
+    // Mapping logic based on grid structure
     return when {
-        row == 2 && col == 1 -> SpacedOutZone.ZONE_1
-        row == 0 && col == 2 -> SpacedOutZone.ZONE_2
-        row == 0 && col == 3 -> SpacedOutZone.ZONE_3
-        row == 1 && col == 2 -> SpacedOutZone.SWEET_SPOT_GRID
+        row == 0 && col == 0 -> SpacedOutZone.Zone1
+        row == 0 && col == 1 -> SpacedOutZone.Zone2
+        row == 0 && col == 2 -> SpacedOutZone.Zone3
+        row == 0 && col == 3 -> SpacedOutZone.Zone4
+        row == 0 && col == 4 -> SpacedOutZone.Zone5
+        // Middle row (wider/larger areas usually)
+        row == 1 && col == 0 -> SpacedOutZone.Zone6
+        row == 1 && col == 1 -> SpacedOutZone.Zone7
+        row == 1 && col == 2 -> SpacedOutZone.Zone8
+        row == 1 && col == 3 -> SpacedOutZone.Zone9
+        row == 1 && col == 4 -> SpacedOutZone.Zone10
+        // Bottom row
+        row == 2 && col == 0 -> SpacedOutZone.Zone11
+        row == 2 && col == 1 -> SpacedOutZone.Zone12
+        row == 2 && col == 2 -> SpacedOutZone.Zone13
+        row == 2 && col == 3 -> SpacedOutZone.Zone14
+        row == 2 && col == 4 -> SpacedOutZone.Zone15
         else -> null
     }
 }
 
-enum class ImportMode(val label: String) { CSV("CSV"), XLSX("XLSX") }
-
-
+@Composable
+private fun SweetSpotBonusButton(bonusOn: Boolean, onToggle: () -> Unit) {
+    Button(
+        onClick = onToggle,
+        colors = ButtonDefaults.buttonColors(
+            backgroundColor = if (bonusOn) Color(0xFF2E7D32) else Color.LightGray
+        ),
+        modifier = Modifier.fillMaxWidth().height(50.dp)
+    ) {
+        Text("Sweet Spot Bonus (${if (bonusOn) "ON" else "OFF"})", color = Color.White)
+    }
+}

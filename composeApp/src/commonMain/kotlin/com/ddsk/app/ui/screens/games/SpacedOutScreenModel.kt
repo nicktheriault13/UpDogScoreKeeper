@@ -9,7 +9,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class SpacedOutZone { ZONE_1, ZONE_2, ZONE_3, SWEET_SPOT_GRID }
+enum class SpacedOutZone(val label: String) {
+    Zone1("1"), Zone2("2"), Zone3("3"), Zone4("4"), Zone5("5"),
+    Zone6("6"), Zone7("7"), Zone8("8"), Zone9("9"), Zone10("10"),
+    Zone11("11"), Zone12("12"), Zone13("13"), Zone14("14"), Zone15("15")
+}
 
 data class SpacedOutParticipant(
     val handler: String,
@@ -35,17 +39,24 @@ data class SpacedOutRoundResult(
     val sweetSpotBonus: Boolean
 )
 
-expect fun parseXlsxRows(bytes: ByteArray): List<List<String>>
-
 class SpacedOutScreenModel : ScreenModel {
 
-    private data class ZoneDescriptor(val label: String, val points: Int)
-
-    private val zoneDescriptors = mapOf(
-        SpacedOutZone.ZONE_1 to ZoneDescriptor(label = "Zone 1", points = 5),
-        SpacedOutZone.ZONE_2 to ZoneDescriptor(label = "Zone 2", points = 5),
-        SpacedOutZone.ZONE_3 to ZoneDescriptor(label = "Zone 3", points = 5),
-        SpacedOutZone.SWEET_SPOT_GRID to ZoneDescriptor(label = "Sweet Spot", points = 5)
+    private val zonePoints = mapOf(
+        SpacedOutZone.Zone1 to 1,
+        SpacedOutZone.Zone2 to 1,
+        SpacedOutZone.Zone3 to 1,
+        SpacedOutZone.Zone4 to 1,
+        SpacedOutZone.Zone5 to 1,
+        SpacedOutZone.Zone6 to 1,
+        SpacedOutZone.Zone7 to 1,
+        SpacedOutZone.Zone8 to 1,
+        SpacedOutZone.Zone9 to 1,
+        SpacedOutZone.Zone10 to 1,
+        SpacedOutZone.Zone11 to 1,
+        SpacedOutZone.Zone12 to 1,
+        SpacedOutZone.Zone13 to 1,
+        SpacedOutZone.Zone14 to 1,
+        SpacedOutZone.Zone15 to 1
     )
 
     private val _score = MutableStateFlow(0)
@@ -102,13 +113,13 @@ class SpacedOutScreenModel : ScreenModel {
     fun handleZoneClick(zone: SpacedOutZone) {
         if (lastZoneClicked == zone) return
 
-        val descriptor = zoneDescriptors[zone] ?: return
-        _score.value += descriptor.points
+        val points = zonePoints[zone] ?: return
+        _score.value += points
         _zonesCaught.value += 1
 
         if (zone !in _clickedZonesInRound.value) {
             val newClickedZones = _clickedZonesInRound.value + zone
-            if (newClickedZones.size == zoneDescriptors.size) {
+            if (newClickedZones.size == zonePoints.size) {
                 awardSpacedOutBonus()
             } else {
                 _clickedZonesInRound.value = newClickedZones
@@ -142,9 +153,9 @@ class SpacedOutScreenModel : ScreenModel {
         appendLog("Field flipped")
     }
 
-    fun zoneLabel(zone: SpacedOutZone): String = zoneDescriptors[zone]?.label ?: zone.name
+    fun zoneLabel(zone: SpacedOutZone): String = zone.label
 
-    fun zonePoints(zone: SpacedOutZone): Int = zoneDescriptors[zone]?.points ?: 0
+    fun zonePoints(zone: SpacedOutZone): Int = zonePoints[zone] ?: 0
 
     fun reset() {
         stopTimer()
@@ -177,15 +188,24 @@ class SpacedOutScreenModel : ScreenModel {
     }
 
     fun importParticipantsFromCsv(csvText: String) {
-        val rows = parseCsvRows(csvText)
-        val participants = buildParticipantsFromRows(rows)
-        applyImportedParticipants(participants, "CSV")
+        val imported = parseCsv(csvText)
+        val players = imported.map { SpacedOutParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players)
     }
 
     fun importParticipantsFromXlsx(xlsxData: ByteArray) {
-        val rows = runCatching { parseXlsxParticipantRows(xlsxData) }.getOrElse { emptyList() }
-        val participants = buildParticipantsFromRows(rows)
-        applyImportedParticipants(participants, "XLSX")
+        val imported = parseXlsx(xlsxData)
+        val players = imported.map { SpacedOutParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players)
+    }
+
+    private fun applyImportedPlayers(players: List<SpacedOutParticipant>) {
+        if (players.isEmpty()) return
+        _participantQueue.value = players.drop(1)
+        _activeParticipant.value = players.first()
+        // Reset logs/history if needed
+        appendLog("Imported ${players.size} teams")
+        reset()
     }
 
     fun exportParticipantsAsCsv(): String {
@@ -342,88 +362,9 @@ class SpacedOutScreenModel : ScreenModel {
         _participantQueue.value = sample.drop(1)
     }
 
-    private fun applyImportedParticipants(
-        participants: List<SpacedOutParticipant>,
-        sourceLabel: String
-    ) {
-        if (participants.isEmpty()) {
-            appendLog("$sourceLabel import found no valid rows")
-            return
-        }
-        _activeParticipant.value = participants.first()
-        _participantQueue.value = participants.drop(1)
-        _completedResults.value = emptyList()
-        reset()
-        appendLog("Imported ${participants.size} participant(s) via $sourceLabel")
-    }
-
-    private fun buildParticipantsFromRows(rows: List<List<String>>): List<SpacedOutParticipant> {
-        if (rows.isEmpty()) return emptyList()
-        val dataRows = if (hasHeaderRow(rows.first())) rows.drop(1) else rows
-        return dataRows.mapNotNull { columns ->
-            val handler = columns.getOrNull(0)?.trim().orEmpty()
-            val dog = columns.getOrNull(1)?.trim().orEmpty()
-            val utn = columns.getOrNull(2)?.trim().orEmpty()
-            if (handler.isBlank() && dog.isBlank()) null else SpacedOutParticipant(handler, dog, utn)
-        }
-    }
-
-    private fun hasHeaderRow(columns: List<String>): Boolean {
-        if (columns.isEmpty()) return false
-        val normalized = columns.map { it.lowercase() }
-        return normalized.any { keyword -> HEADER_KEYWORDS.any { keyword.contains(it) } }
-    }
-
-    private fun parseCsvRows(csvText: String): List<List<String>> {
-        val rows = mutableListOf<List<String>>()
-        csvText.lineSequence()
-            .map { it.trimEnd('\r') }
-            .filter { it.isNotBlank() }
-            .forEach { rows += splitCsvLine(it) }
-        return rows
-    }
-
-    private fun splitCsvLine(line: String): List<String> {
-        val result = mutableListOf<String>()
-        val current = StringBuilder()
-        var inQuotes = false
-        var i = 0
-        while (i < line.length) {
-            val ch = line[i]
-            when {
-                ch == '"' -> {
-                    if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
-                        current.append('"')
-                        i++
-                    } else {
-                        inQuotes = !inQuotes
-                    }
-                }
-                ch == ',' && !inQuotes -> {
-                    result += current.toString().trim().trim('"')
-                    current.clear()
-                }
-                else -> current.append(ch)
-            }
-            i++
-        }
-        result += current.toString().trim().trim('"')
-        return result
-    }
-
-    private fun parseXlsxParticipantRows(xlsx: ByteArray): List<List<String>> = parseXlsxRows(xlsx)
-
-    private fun String.unescapeXmlEntities(): String =
-        replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&apos;", "'")
-
     private companion object {
         private const val SPACED_OUT_COMPLETION_BONUS = 25
         private const val SWEET_SPOT_BONUS_POINTS = 5
         private const val DEFAULT_TIMER_SECONDS = 60
-        private val HEADER_KEYWORDS = listOf("handler", "dog", "utn")
     }
 }

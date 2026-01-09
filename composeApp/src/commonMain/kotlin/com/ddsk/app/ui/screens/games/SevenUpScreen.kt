@@ -1,36 +1,21 @@
 package com.ddsk.app.ui.screens.games
 
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.AlertDialog
-import androidx.compose.material.Button
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.Text
-import androidx.compose.material.TextField
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.getScreenModel
+import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
+import kotlinx.coroutines.launch
+
+private fun Float.formatTwoDecimals(): String = (this * 100).toInt().toDouble().div(100).toString()
 
 object SevenUpScreen : Screen {
-
     @Composable
     override fun Content() {
         val screenModel = getScreenModel<SevenUpScreenModel>()
@@ -40,9 +25,30 @@ object SevenUpScreen : Screen {
         val rectangleVersion by screenModel.rectangleVersion.collectAsState()
 
         var showTimeDialog by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+
+        val filePicker = rememberFilePicker { result ->
+            scope.launch {
+                when (result) {
+                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
+                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
+                    else -> {}
+                }
+            }
+        }
 
         if (showTimeDialog) {
             TimeInputDialog(screenModel) { showTimeDialog = false }
+        }
+
+        val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("7-Up") })
+
+        LaunchedEffect(isTimerRunning) {
+            if (isTimerRunning) {
+                audioPlayer.play()
+            } else {
+                audioPlayer.stop()
+            }
         }
 
         Column(
@@ -56,7 +62,7 @@ object SevenUpScreen : Screen {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Score: $score", style = MaterialTheme.typography.h5)
-                Text("Time: %.2f".format(timeRemaining), style = MaterialTheme.typography.h5)
+                Text("Time: ${timeRemaining.formatTwoDecimals()}", style = MaterialTheme.typography.h5)
             }
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -68,6 +74,24 @@ object SevenUpScreen : Screen {
                 }
             }
             Spacer(Modifier.height(16.dp))
+
+            // Import buttons
+            val filePicker = rememberFilePicker { result ->
+                scope.launch {
+                    when (result) {
+                        is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
+                        is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
+                        else -> {}
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Button(onClick = { filePicker.launch() }) { Text("Import") }
+                Button(onClick = { /* Export */ }) { Text("Export") }
+            }
+            Spacer(Modifier.height(16.dp))
+
             Button(onClick = { screenModel.cycleRectangleVersion() }) {
                 Text("Version ${rectangleVersion + 1}")
             }
@@ -141,8 +165,8 @@ private fun SevenUpGrid(screenModel: SevenUpScreenModel) {
 
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
                             .weight(1f)
+                            .fillMaxHeight()
                             .border(0.5.dp, MaterialTheme.colors.onSurface)
                     ) {
                         Button(

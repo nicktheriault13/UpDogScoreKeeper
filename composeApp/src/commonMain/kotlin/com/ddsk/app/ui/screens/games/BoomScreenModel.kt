@@ -199,38 +199,41 @@ class BoomScreenModel : ScreenModel {
     }
 
     fun skipParticipant() {
-        _uiState.update { state ->
-            val active = state.activeParticipant ?: return@update state
-            val newQueue = state.queue + active
-            val nextActive = newQueue.firstOrNull()
-            val remaining = if (newQueue.isEmpty()) emptyList() else newQueue.drop(1)
-            state.copy(
-                activeParticipant = nextActive,
-                queue = remaining,
-                scoreBreakdown = BoomScoreBreakdown(),
-                buttonState = BoomButtonState(),
-                sweetSpotActive = false
+        val active = _uiState.value.activeParticipant ?: return
+        val queue = _uiState.value.queue
+        val nextActive = queue.firstOrNull()
+        val remainingQueue = if (queue.isEmpty()) emptyList() else queue.drop(1) + active
+        _uiState.update {
+            it.copy(
+                activeParticipant = nextActive ?: active,
+                queue = if (queue.isEmpty()) listOf(active) else remainingQueue
             )
         }
-    }
-
-    fun addParticipant(participant: BoomParticipant) {
-        _uiState.update { state ->
-            if (state.activeParticipant == null) {
-                state.copy(activeParticipant = participant)
-            } else {
-                state.copy(queue = state.queue + participant)
-            }
-        }
+        resetGame()
     }
 
     fun importParticipantsFromCsv(csvText: String) {
-        val parsed = parseParticipantsCsv(csvText)
-        if (parsed.isEmpty()) return
-        _uiState.value = BoomUiState(
-            activeParticipant = parsed.first(),
-            queue = parsed.drop(1)
-        )
+        val imported = parseCsv(csvText)
+        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players)
+    }
+
+    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
+        val imported = parseXlsx(xlsxData)
+        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players)
+    }
+
+    private fun applyImportedPlayers(players: List<BoomParticipant>) {
+        if (players.isEmpty()) return
+        _uiState.update {
+            it.copy(
+                activeParticipant = players.first(),
+                queue = players.drop(1),
+                completedParticipants = emptyList()
+            )
+        }
+        resetGame()
     }
 
     fun exportParticipantsAsCsv(): String {
@@ -254,32 +257,6 @@ class BoomScreenModel : ScreenModel {
                     stats.sweetSpotAwards
                 ).joinToString(","))
             }
-        }
-    }
-
-    fun importSampleParticipants() {
-        val sample = listOf(
-            BoomParticipant(handler = "Alex", dog = "Nova", utn = "UDC123"),
-            BoomParticipant(handler = "Brooke", dog = "Pixel", utn = "UDC456"),
-            BoomParticipant(handler = "Charlie", dog = "Rocket", utn = "UDC789")
-        )
-        _uiState.value = BoomUiState(
-            activeParticipant = sample.firstOrNull(),
-            queue = sample.drop(1)
-        )
-    }
-
-    private fun parseParticipantsCsv(csvText: String): List<BoomParticipant> {
-        val lines = csvText.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        if (lines.isEmpty()) return emptyList()
-        val dataLines = if (lines.first().contains("handler", ignoreCase = true)) lines.drop(1) else lines
-        return dataLines.mapNotNull { line ->
-            val cols = line.split(',').map { it.trim() }
-            val handler = cols.getOrNull(0).orEmpty()
-            val dog = cols.getOrNull(1).orEmpty()
-            val utn = cols.getOrNull(2).orEmpty()
-            if (handler.isBlank() && dog.isBlank()) return@mapNotNull null
-            BoomParticipant(handler = handler, dog = dog, utn = utn)
         }
     }
 
@@ -309,5 +286,12 @@ class BoomScreenModel : ScreenModel {
 
     fun toggleFieldOrientation() {
         _uiState.update { it.copy(isFieldFlipped = !it.isFieldFlipped) }
+    }
+
+    private fun importSampleParticipants() {
+        val sample = listOf(
+            BoomParticipant("Sample Handler", "Sample Dog", "UDC-000")
+        )
+        _uiState.update { it.copy(activeParticipant = sample.first(), queue = sample.drop(1)) }
     }
 }

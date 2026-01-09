@@ -1,8 +1,17 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
+import cafe.adriel.voyager.core.model.screenModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+data class FunKeyParticipant(
+    val handler: String,
+    val dog: String,
+    val utn: String
+)
 
 enum class FunKeyZoneType { JUMP, KEY }
 
@@ -45,6 +54,12 @@ class FunKeyScreenModel : ScreenModel {
 
     private val _misses = MutableStateFlow(0)
     val misses = _misses.asStateFlow()
+
+    private val _activeParticipant = MutableStateFlow<FunKeyParticipant?>(null)
+    val activeParticipant = _activeParticipant.asStateFlow()
+
+    private val _participantQueue = MutableStateFlow<List<FunKeyParticipant>>(emptyList())
+    val participantQueue = _participantQueue.asStateFlow()
 
     fun handleCatch(type: FunKeyZoneType, points: Int, zoneId: String) {
         if (type == FunKeyZoneType.JUMP && _isPurpleEnabled.value) {
@@ -110,5 +125,43 @@ class FunKeyScreenModel : ScreenModel {
         _key3Count.value = 0
         _key4Count.value = 0
         _sweetSpotOn.value = false
+    }
+
+    fun addParticipant(handler: String, dog: String, utn: String) {
+        val participant = FunKeyParticipant(handler, dog, utn)
+        _participantQueue.update { it + participant }
+        if (_activeParticipant.value == null) {
+            nextParticipant()
+        }
+    }
+
+    fun nextParticipant() {
+        if (_participantQueue.value.isNotEmpty()) {
+            _activeParticipant.value = _participantQueue.value.first()
+            _participantQueue.update { it.drop(1) }
+            reset()
+        } else {
+            _activeParticipant.value = null
+            reset()
+        }
+    }
+
+    fun skipParticipant() {
+        val active = _activeParticipant.value ?: return
+        _participantQueue.update { it + active }
+    }
+
+    fun importParticipantsFromCsv(csv: String) {
+        val imported = parseCsv(csv)
+        val participants = imported.map { FunKeyParticipant(it.handler, it.dog, it.utn) }
+        _participantQueue.value = participants
+        nextParticipant()
+    }
+
+    fun importParticipantsFromXlsx(xlsx: ByteArray) {
+        val imported = parseXlsx(xlsx)
+        val participants = imported.map { FunKeyParticipant(it.handler, it.dog, it.utn) }
+        _participantQueue.value = participants
+        nextParticipant()
     }
 }

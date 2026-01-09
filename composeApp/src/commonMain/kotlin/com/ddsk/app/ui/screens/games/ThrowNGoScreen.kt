@@ -3,8 +3,6 @@
 package com.ddsk.app.ui.screens.games
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,11 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -29,42 +24,66 @@ import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Card
-import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.core.screen.Screen
+import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.koin.getScreenModel
 
 object ThrowNGoScreen : Screen {
-
     @Composable
     override fun Content() {
-        val screenModel = getScreenModel<ThrowNGoScreenModel>()
+        val screenModel = rememberScreenModel { ThrowNGoScreenModel() }
         val uiState by screenModel.uiState.collectAsState()
         val timerRunning by screenModel.timerRunning.collectAsState()
         val timeLeft by screenModel.timeLeft.collectAsState()
 
+        val scope = rememberCoroutineScope()
         var showAddParticipant by remember { mutableStateOf(false) }
         var handlerInput by remember { mutableStateOf("") }
         var dogInput by remember { mutableStateOf("") }
         var utnInput by remember { mutableStateOf("") }
 
-        var showImport by remember { mutableStateOf(false) }
-        var importBuffer by remember { mutableStateOf("") }
+        var exportBuffer by remember { mutableStateOf<String?>(null) }
+        var logBuffer by remember { mutableStateOf<String?>(null) }
+
+        val filePicker = rememberFilePicker { result ->
+            scope.launch {
+                when (result) {
+                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
+                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
+                    else -> {}
+                }
+            }
+        }
+
+        val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Throw N Go") })
+
+        LaunchedEffect(timerRunning) {
+            if (timerRunning) {
+                audioPlayer.play()
+            } else {
+                audioPlayer.stop()
+            }
+        }
 
         Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -85,9 +104,9 @@ object ThrowNGoScreen : Screen {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                     Sidebar(
                         modifier = Modifier.width(180.dp),
-                        onImport = { showImport = true },
-                        onExport = screenModel::exportParticipantsAsCsv,
-                        onExportLog = screenModel::exportLog,
+                        onImport = { filePicker.launch() },
+                        onExport = { exportBuffer = screenModel.exportParticipantsAsCsv() },
+                        onExportLog = { logBuffer = screenModel.exportLog() },
                         onAddTeam = { showAddParticipant = true },
                         onHelp = {},
                         onReset = screenModel::resetRound,
@@ -132,19 +151,19 @@ object ThrowNGoScreen : Screen {
             )
         }
 
-        if (showImport) {
-            ImportDialog(
-                text = importBuffer,
-                onTextChange = { importBuffer = it },
-                onDismiss = {
-                    showImport = false
-                    importBuffer = ""
-                },
-                onConfirm = {
-                    screenModel.importParticipantsFromCsv(importBuffer)
-                    showImport = false
-                    importBuffer = ""
-                }
+        exportBuffer?.let { payload ->
+            TextPreviewDialog(
+                title = "Export Participants",
+                text = payload,
+                onDismiss = { exportBuffer = null }
+            )
+        }
+
+        logBuffer?.let { payload ->
+            TextPreviewDialog(
+                title = "Run Log",
+                text = payload,
+                onDismiss = { logBuffer = null }
             )
         }
     }
@@ -196,8 +215,8 @@ private fun HeaderRow(
 private fun Sidebar(
     modifier: Modifier = Modifier,
     onImport: () -> Unit,
-    onExport: () -> String,
-    onExportLog: () -> String,
+    onExport: () -> Unit,
+    onExportLog: () -> Unit,
     onAddTeam: () -> Unit,
     onHelp: () -> Unit,
     onReset: () -> Unit,
@@ -211,8 +230,8 @@ private fun Sidebar(
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = modifier) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SidebarButton(label = "Import", onClick = onImport)
-            SidebarButton(label = "Export") { onExport() }
-            SidebarButton(label = "Log") { onExportLog() }
+            SidebarButton(label = "Export", onClick = onExport)
+            SidebarButton(label = "Log", onClick = onExportLog)
             SidebarButton(label = "Add Team", onClick = onAddTeam)
             SidebarButton(label = "Help", onClick = onHelp)
             SidebarButton(label = "Reset", onClick = onReset)
@@ -324,27 +343,18 @@ private fun ParticipantDialog(
 }
 
 @Composable
-private fun ImportDialog(
-    text: String,
-    onTextChange: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
+private fun TextPreviewDialog(title: String, text: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Import Participants") },
+        title = { Text(title) },
         text = {
-            Column {
-                Text(text = "Paste CSV rows (handler,dog,utn)", fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(value = text, onValueChange = onTextChange, modifier = Modifier.height(160.dp))
-            }
+            OutlinedTextField(
+                value = text,
+                onValueChange = {},
+                modifier = Modifier.fillMaxWidth().height(220.dp),
+                readOnly = true
+            )
         },
-        confirmButton = {
-            TextButton(onClick = onConfirm, enabled = text.isNotBlank()) { Text("Import") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
 }

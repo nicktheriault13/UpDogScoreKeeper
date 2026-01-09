@@ -33,6 +33,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +49,7 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.getScreenModel
 import com.ddsk.app.ui.theme.Palette
 import com.ddsk.app.ui.screens.games.FireballGridPoint
+import kotlinx.coroutines.launch
 
 object FireballScreen : Screen {
 
@@ -77,6 +79,17 @@ object FireballScreen : Screen {
         }
 
         var showClearParticipantsDialog by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+
+        val filePicker = rememberFilePicker { result ->
+            scope.launch {
+                when (result) {
+                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
+                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
+                    else -> {}
+                }
+            }
+        }
 
         Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -111,7 +124,7 @@ object FireballScreen : Screen {
                         SidebarColumn(
                             collapsed = sidebarCollapsed,
                             onToggle = screenModel::toggleSidebar,
-                            onImport = screenModel::importParticipants,
+                            onImport = { filePicker.launch() },
                             onExport = screenModel::exportScores,
                             onHelp = screenModel::openHelp,
                             onClearBoard = screenModel::clearBoard,
@@ -532,4 +545,3 @@ private fun ZoneButton(value: Int, clicked: Boolean, fireball: Boolean, onClick:
         Text(value.toString(), fontSize = 28.sp, fontWeight = FontWeight.Bold)
     }
 }
-

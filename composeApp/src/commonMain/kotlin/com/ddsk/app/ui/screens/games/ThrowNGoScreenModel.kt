@@ -235,25 +235,41 @@ class ThrowNGoScreenModel : ScreenModel {
         _uiState.value = ThrowNGoUiState()
     }
 
+    fun importParticipants(csvData: String) {
+        val lines = csvData.lines().filter { it.isNotBlank() }
+        val header = lines.firstOrNull()?.lowercase() ?: return
+        val dataLines = if (header.contains("handler")) lines.drop(1) else lines
+        val participants = dataLines.mapNotNull { line ->
+            val cols = line.split(",").map { it.trim() }
+            if (cols.size < 2) return@mapNotNull null
+            ThrowNGoParticipant(cols.first(), cols[1], cols.getOrElse(2) { "" })
+        }
+        applyImport(participants)
+    }
+
     fun importParticipantsFromCsv(csvText: String) {
+        val imported = parseCsv(csvText)
+        val participants = imported.map { ThrowNGoParticipant(it.handler, it.dog, it.utn) }
+        applyImport(participants)
+    }
+
+    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
+        val imported = parseXlsx(xlsxData)
+        val participants = imported.map { ThrowNGoParticipant(it.handler, it.dog, it.utn) }
+        applyImport(participants)
+    }
+
+    private fun applyImport(participants: List<ThrowNGoParticipant>) {
         snapshotState()
-        val parsed = csvText.lines()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .let { lines -> if (lines.firstOrNull()?.contains("handler", ignoreCase = true) == true) lines.drop(1) else lines }
-            .mapNotNull { line ->
-                val cols = line.split(',').map { it.trim() }
-                val handler = cols.getOrNull(0).orEmpty()
-                val dog = cols.getOrNull(1).orEmpty()
-                val utn = cols.getOrNull(2).orEmpty()
-                if (handler.isBlank() && dog.isBlank()) return@mapNotNull null
-                ThrowNGoParticipant(handler = handler, dog = dog, utn = utn)
-            }
-        if (parsed.isEmpty()) return
-        _uiState.value = ThrowNGoUiState(
-            activeParticipant = parsed.first(),
-            queue = parsed.drop(1)
-        )
+        _uiState.update { state ->
+            val first = participants.firstOrNull() ?: return@update state
+            state.copy(
+                activeParticipant = first,
+                queue = participants.drop(1),
+                completed = emptyList(),
+                scoreState = ThrowNGoScoreState()
+            )
+        }
     }
 
     fun exportParticipantsAsCsv(): String {

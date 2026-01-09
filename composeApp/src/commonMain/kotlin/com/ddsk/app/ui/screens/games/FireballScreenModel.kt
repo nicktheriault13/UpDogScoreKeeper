@@ -182,6 +182,11 @@ class FireballScreenModel : ScreenModel {
     fun resetGame() {
         _completedBoards.value = emptyList()
         resetBoardState(preserveAllRollers = false)
+        updateSidebarMessage("Game reset")
+    }
+
+    private fun updateSidebarMessage(message: String) {
+        _sidebarMessage.value = message
     }
 
     fun toggleAllRollers() {
@@ -213,44 +218,44 @@ class FireballScreenModel : ScreenModel {
         }
     }
 
-    fun importParticipantsFromCsv(csvText: String) {
-        val parsed = parseParticipantsCsv(csvText)
-        if (parsed.isEmpty()) return
-        _activeParticipant.value = parsed.first()
-        _participantsQueue.value = parsed.drop(1)
-        _completedParticipants.value = emptyList()
-        resetGame()
+    fun importParticipants(csvData: String) {
+        val rows = parseCsvRows(csvData)
+        val imported = extractParticipantsFromRows(rows)
+        val players = imported.map { FireballParticipant(it.handler, it.dog, it.utn) }
+        if (players.isEmpty()) return
+        applyImportedPlayers(players)
     }
 
-    fun exportParticipantsAsCsv(): String {
-        val header = "handler,dog,utn,totalPoints,nonFireballPoints,fireballPoints,sweetSpotBonus,highestZone,allRollers,completedBoards\n"
-        return buildString {
-            append(header)
-            val queueSnapshots = _participantsQueue.value.mapIndexed { index, participant ->
-                participant.copy(stats = if (index == 0 && _clickedZones.value.isNotEmpty()) FireballParticipantStats.fromBreakdown(_scoreBreakdown.value) else participant.stats)
-            }
-            val activeSnapshot = currentParticipantSnapshot()
-            val completed = _completedParticipants.value
-            val allRows = buildList {
-                activeSnapshot?.let { add(it) }
-                addAll(queueSnapshots)
-                addAll(completed)
-            }
-            allRows.forEach { participant ->
-                val stats = participant.stats
-                appendLine(listOf(
-                    participant.handler,
-                    participant.dog,
-                    participant.utn,
-                    stats.totalPoints,
-                    stats.nonFireballPoints,
-                    stats.fireballPoints,
-                    stats.sweetSpotBonus,
-                    stats.highestZone ?: 0,
-                    stats.allRollers,
-                    stats.completedBoards
-                ).joinToString(","))
-            }
+    fun importParticipantsFromCsv(csvText: String) {
+        val imported = parseCsv(csvText)
+        val players = imported.map { FireballParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players)
+    }
+
+    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
+        val imported = parseXlsx(xlsxData)
+        val players = imported.map { FireballParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players)
+    }
+
+    private fun applyImportedPlayers(players: List<FireballParticipant>) {
+        if (players.isEmpty()) return
+        _activeParticipant.value = players.first()
+        _participantsQueue.value = players.drop(1)
+        _completedParticipants.value = emptyList()
+        resetGame()
+        updateSidebarMessage("Imported ${players.size} teams")
+    }
+
+    fun exportScores(): String {
+        val csv = generateCsvString()
+        println("Fireball export CSV size: ${csv.length}")
+        return csv
+    }
+
+    private fun generateCsvString(): String {
+        return allParticipantsSnapshot().joinToString("\n") { p ->
+            "${p.handler},${p.dog},${p.utn},${p.stats.totalPoints},${p.stats.allRollers}"
         }
     }
 
@@ -351,22 +356,6 @@ class FireballScreenModel : ScreenModel {
         return snapshots
     }
 
-    private fun parseParticipantsCsv(csvText: String): List<FireballParticipant> {
-        val lines = csvText.lines()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        if (lines.isEmpty()) return emptyList()
-        val dataLines = if (lines.first().contains("handler", ignoreCase = true)) lines.drop(1) else lines
-        return dataLines.mapNotNull { line ->
-            val cols = line.split(',').map { it.trim() }
-            val handler = cols.getOrNull(0).orEmpty()
-            val dog = cols.getOrNull(1).orEmpty()
-            val utn = cols.getOrNull(2).orEmpty()
-            if (handler.isBlank() && dog.isBlank()) return@mapNotNull null
-            FireballParticipant(handler = handler, dog = dog, utn = utn)
-        }
-    }
-
     private fun getPointsForCell(row: Int, col: Int): Int = zoneValue(row, col) ?: 0
 
     fun startRoundTimer(durationSeconds: Int = 64) {
@@ -403,11 +392,6 @@ class FireballScreenModel : ScreenModel {
         importSampleParticipants()
     }
 
-    fun exportScores() {
-        // Export current participants as CSV and log to console (UI may provide sharing in the future)
-        val csv = exportParticipantsAsCsv()
-        println("Fireball export CSV size: ${'$'}{csv.length}")
-    }
 
     fun openHelp() {
         // Placeholder - UI will open its own help modal; keep method for compatibility

@@ -142,32 +142,58 @@ class FourWayPlayScreenModel : ScreenModel {
         recordSidebarAction("Participant skipped")
     }
 
-    fun recordSidebarAction(label: String) {
-        _lastSidebarAction.value = label
+    fun importParticipantsFromCsv(csvText: String) {
+        val imported = parseCsv(csvText)
+        val participants = imported.map { Participant(it.handler, it.dog, it.utn) }
+        _participants.value = participants
+        recordSidebarAction("Imported ${participants.size} from CSV")
+    }
+
+    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
+        val imported = parseXlsx(xlsxData)
+        val participants = imported.map { Participant(it.handler, it.dog, it.utn) }
+        _participants.value = participants
+        recordSidebarAction("Imported ${participants.size} from XLSX")
+    }
+
+    fun exportParticipantsAsCsv(): String {
+        return buildString {
+            append("Handler,Dog,UTN\n")
+            _participants.value.forEach { p ->
+                append("${p.handler},${p.dog},${p.utn}\n")
+            }
+        }
+    }
+
+    fun exportLog(): String {
+        return "Log export not implemented yet."
+    }
+
+    fun recordSidebarAction(action: String) {
+        _lastSidebarAction.value = action
     }
 
     fun undo() {
-        val snapshot = undoStack.removeFirstOrNull() ?: return
+        if (undoStack.isEmpty()) return
+        val snapshot = undoStack.removeLast()
         _score.value = snapshot.score
         _quads.value = snapshot.quads
         _clickedZones.value = snapshot.clickedZones
         _sweetSpotClicked.value = snapshot.sweetSpot
         _misses.value = snapshot.misses
-        _lastSidebarAction.value = "Undo applied"
     }
 
     private fun pushSnapshot() {
-        undoStack.addFirst(
-            Snapshot(
-                score = _score.value,
-                quads = _quads.value,
-                clickedZones = _clickedZones.value,
-                sweetSpot = _sweetSpotClicked.value,
-                misses = _misses.value,
-            )
+        val snapshot = Snapshot(
+            score = _score.value,
+            quads = _quads.value,
+            clickedZones = _clickedZones.value,
+            sweetSpot = _sweetSpotClicked.value,
+            misses = _misses.value
         )
+        undoStack.addLast(snapshot)
         if (undoStack.size > snapshotLimit) {
-            undoStack.removeLast()
+            undoStack.removeFirst()
         }
     }
 }
