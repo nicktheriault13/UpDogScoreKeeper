@@ -84,11 +84,15 @@ kotlin {
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation("org.apache.poi:poi:5.2.5")
+                implementation("org.apache.poi:poi-ooxml:5.2.5")
             }
         }
         val iosMain by creating {
-             dependencies {
-             }
+            dependsOn(commonMain)
+            iosX64().compilations.getByName("main").defaultSourceSet.dependsOn(this)
+            iosArm64().compilations.getByName("main").defaultSourceSet.dependsOn(this)
+            iosSimulatorArm64().compilations.getByName("main").defaultSourceSet.dependsOn(this)
         }
     }
 }
@@ -97,12 +101,12 @@ android {
     namespace = "com.ddsk.app"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
-    // sourceSets {
-    //     getByName("main") {
-    //         resources.srcDirs("src/commonMain/resources")
-    //         assets.srcDirs("src/commonMain/resources/assets")
-    //     }
-    // }
+    sourceSets {
+        getByName("main") {
+            // Map common assets to Android assets so they can be accessed via AssetManager
+            assets.srcDirs("src/commonMain/resources/assets")
+        }
+    }
 
     defaultConfig {
         applicationId = "com.ddsk.app"

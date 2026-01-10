@@ -47,11 +47,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ddsk.app.persistence.rememberDataStore
 
 object ThrowNGoScreen : Screen {
     @Composable
     override fun Content() {
         val screenModel = rememberScreenModel { ThrowNGoScreenModel() }
+        val dataStore = rememberDataStore()
+        LaunchedEffect(Unit) {
+            screenModel.initPersistence(dataStore)
+        }
         val uiState by screenModel.uiState.collectAsState()
         val timerRunning by screenModel.timerRunning.collectAsState()
         val timeLeft by screenModel.timeLeft.collectAsState()
@@ -122,7 +127,6 @@ object ThrowNGoScreen : Screen {
 
                     Box(modifier = Modifier.fillMaxWidth()) {
                         ScoringGrid(
-                            uiState = uiState,
                             onScore = screenModel::recordThrow
                         )
                     }
@@ -270,7 +274,7 @@ private fun ParticipantList(uiState: ThrowNGoUiState, modifier: Modifier = Modif
 }
 
 @Composable
-private fun ScoringGrid(uiState: ThrowNGoUiState, onScore: (Int, Boolean) -> Unit) {
+private fun ScoringGrid(onScore: (Int, Boolean) -> Unit) {
     Card(shape = RoundedCornerShape(18.dp), elevation = 8.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf(

@@ -269,17 +269,68 @@ actual fun generateGreedyXlsx(participants: List<GreedyScreenModel.GreedyPartici
     }
 }
 
+actual fun generateFourWayPlayXlsx(participants: List<FourWayPlayExportParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3
+        participants.forEachIndexed { index, p ->
+            val row = worksheet.getRow(startRow + index) ?: worksheet.createRow(startRow + index)
+            row.createCell(1).setCellValue(p.handler)
+            row.createCell(2).setCellValue(p.dog)
+            row.createCell(3).setCellValue(p.utn)
+            row.createCell(4).setCellValue(p.zone1Catches.toDouble())
+            row.createCell(5).setCellValue(p.zone2Catches.toDouble())
+            row.createCell(6).setCellValue(p.zone3Catches.toDouble())
+            row.createCell(7).setCellValue(p.zone4Catches.toDouble())
+
+            // Flags are exported as Ints (0/1) to keep the expect/actual stable across platforms
+            row.createCell(10).setCellValue(if (p.sweetSpot != 0) "Y" else "N")
+            row.createCell(12).setCellValue(if (p.allRollers != 0) "Y" else "N")
+
+            row.createCell(14).setCellValue(p.heightDivision)
+            row.createCell(15).setCellValue(p.misses.toDouble())
+        }
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
 @Composable
 actual fun rememberAssetLoader(): AssetLoader {
     val context = LocalContext.current
     return remember(context) {
         object : AssetLoader {
             override fun load(path: String): ByteArray? {
-                return try {
-                    context.assets.open(path).use { it.readBytes() }
+                val assetsPath = "assets/$path"
+
+                // Try classpath first (commonMain/resources bundled in jar)
+                try {
+                    val stream = ImportedParticipant::class.java.classLoader?.getResourceAsStream(assetsPath)
+                    if (stream != null) {
+                        return stream.use { it.readBytes() }
+                    }
                 } catch (e: Exception) {
-                    e.printStackTrace()
-                    null
+                    // ignore
+                }
+
+                // Try Android Assets
+                return try {
+                    context.assets.open(assetsPath).use { it.readBytes() }
+                } catch (e: Exception) {
+                    try {
+                        // Try without assets prefix
+                        context.assets.open(path).use { it.readBytes() }
+                    } catch (e2: Exception) {
+                        e2.printStackTrace()
+                        null
+                    }
                 }
             }
         }

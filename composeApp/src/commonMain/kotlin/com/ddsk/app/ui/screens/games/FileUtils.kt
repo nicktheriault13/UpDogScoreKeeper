@@ -1,6 +1,7 @@
 package com.ddsk.app.ui.screens.games
 
 import androidx.compose.runtime.Composable
+import com.ddsk.app.ui.screens.games.FarOutParticipant
 
 // Consolidated from FileUtils.kt and GameImporter.kt
 data class ImportedParticipant(
@@ -10,6 +11,23 @@ data class ImportedParticipant(
     val jumpHeight: String = "",
     val heightDivision: String = "",
     val clubDivision: String = ""
+)
+
+@kotlinx.serialization.Serializable
+data class FourWayPlayExportParticipant(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val zone1Catches: Int,
+    val zone2Catches: Int,
+    val zone3Catches: Int,
+    val zone4Catches: Int,
+    /** 1 or 0 */
+    val sweetSpot: Int,
+    /** 1 or 0 */
+    val allRollers: Int,
+    val heightDivision: String,
+    val misses: Int
 )
 
 sealed class ImportResult {
@@ -41,6 +59,7 @@ expect fun rememberFilePicker(onResult: (ImportResult) -> Unit): FilePickerLaunc
 expect fun parseXlsx(bytes: ByteArray): List<ImportedParticipant>
 expect fun generateFarOutXlsx(participants: List<FarOutParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateGreedyXlsx(participants: List<GreedyScreenModel.GreedyParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateFourWayPlayXlsx(participants: List<FourWayPlayExportParticipant>, templateBytes: ByteArray): ByteArray
 
 // From GameImporter.kt
 expect fun parseXlsxRows(bytes: ByteArray): List<List<String>>

@@ -1,19 +1,74 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
+import cafe.adriel.voyager.core.model.screenModelScope
+import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.math.max
 
 class FourWayPlayScreenModel : ScreenModel {
 
+    @Serializable
     data class Participant(
         val handler: String,
         val dog: String,
         val utn: String,
+        val heightDivision: String = "",
+        val zone1Catches: Int = 0,
+        val zone2Catches: Int = 0,
+        val zone3Catches: Int = 0,
+        val zone4Catches: Int = 0,
+        val sweetSpot: Boolean = false,
+        val allRollers: Boolean = false,
+        val misses: Int = 0,
+        val score: Int = 0,
         val hasScore: Boolean = false,
     )
+
+    @Serializable
+    data class PersistedState(
+        val participants: List<Participant> = emptyList(),
+        val completed: List<Participant> = emptyList()
+    )
+
+    private var dataStore: DataStore? = null
+    private val persistenceKey = "FourWayPlayData.json"
+
+    fun initPersistence(store: DataStore) {
+        dataStore = store
+        screenModelScope.launch {
+            val json = store.load(persistenceKey)
+            if (json != null) {
+                try {
+                    val state = Json.decodeFromString<PersistedState>(json)
+                    _participants.value = state.participants
+                    _completed.value = state.completed
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    private fun persistState() {
+        val store = dataStore ?: return
+        val state = PersistedState(_participants.value, _completed.value)
+        screenModelScope.launch {
+            try {
+                val json = Json.encodeToString(state)
+                store.save(persistenceKey, json)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     private data class Snapshot(
         val score: Int,
@@ -47,15 +102,11 @@ class FourWayPlayScreenModel : ScreenModel {
     private val _sidebarCollapsed = MutableStateFlow(false)
     val sidebarCollapsed: StateFlow<Boolean> = _sidebarCollapsed.asStateFlow()
 
-    private val _participants = MutableStateFlow(
-        listOf(
-            Participant("Alex Vega", "Bolt", "UTN-001"),
-            Participant("Jamie Reed", "Skye", "UTN-002"),
-            Participant("Morgan Lee", "Nova", "UTN-003"),
-            Participant("Harper Quinn", "Echo", "UTN-004"),
-        )
-    )
+    private val _participants = MutableStateFlow<List<Participant>>(emptyList())
     val participants: StateFlow<List<Participant>> = _participants.asStateFlow()
+
+    private val _completed = MutableStateFlow<List<Participant>>(emptyList())
+    val completed: StateFlow<List<Participant>> = _completed.asStateFlow()
 
     private val _lastSidebarAction = MutableStateFlow("Ready for actions")
     val lastSidebarAction: StateFlow<String> = _lastSidebarAction.asStateFlow()
@@ -74,26 +125,10 @@ class FourWayPlayScreenModel : ScreenModel {
         } else {
             _clickedZones.value = updatedZones
         }
+        _zoneCatchMap[zoneValue] = (_zoneCatchMap[zoneValue] ?: 0) + 1
     }
 
-    fun handleSweetSpotClick() {
-        pushSnapshot()
-        if (_sweetSpotClicked.value) {
-            _score.value -= 2
-        } else {
-            _score.value += 2
-        }
-        _sweetSpotClicked.value = !_sweetSpotClicked.value
-    }
-
-    fun registerMiss() {
-        pushSnapshot()
-        _misses.value = max(0, _misses.value + 1)
-    }
-
-    fun flipField() {
-        _fieldFlipped.value = !_fieldFlipped.value
-    }
+    private val _zoneCatchMap = mutableMapOf<Int, Int>()
 
     fun resetScoring() {
         pushSnapshot()
@@ -102,31 +137,46 @@ class FourWayPlayScreenModel : ScreenModel {
         _sweetSpotClicked.value = false
         _quads.value = 0
         _misses.value = 0
+        _zoneCatchMap.clear()
     }
 
-    fun toggleAllRollers() {
-        _allRollers.value = !_allRollers.value
+    fun moveToNextParticipant() {
+        if (_participants.value.isEmpty()) return
+        val current = _participants.value.first()
+        val updatedCurrent = current.copy(
+            zone1Catches = _zoneCatchMap[1] ?: 0,
+            zone2Catches = _zoneCatchMap[2] ?: 0,
+            zone3Catches = _zoneCatchMap[3] ?: 0,
+            zone4Catches = _zoneCatchMap[4] ?: 0,
+            sweetSpot = _sweetSpotClicked.value,
+            allRollers = _allRollers.value,
+            misses = _misses.value,
+            score = _score.value,
+            hasScore = (_zoneCatchMap.isNotEmpty() || _sweetSpotClicked.value || _misses.value > 0)
+        )
+        if (updatedCurrent.hasScore) {
+            _completed.value = _completed.value + updatedCurrent
+        } else {
+            _participants.value = _participants.value.drop(1) + updatedCurrent
+        }
+        _participants.value = _participants.value.drop(1)
+        resetScoring()
+        recordSidebarAction("Next participant saved")
+        persistState()
     }
 
-    fun toggleSidebar() {
-        _sidebarCollapsed.value = !_sidebarCollapsed.value
-    }
+    fun getParticipantsForExport(): List<Participant> = _completed.value.filter { it.hasScore }
 
-    fun addParticipant(handler: String, dog: String, utn: String) {
-        _participants.value = _participants.value + Participant(handler, dog, utn)
+    fun addParticipant(handler: String, dog: String, utn: String, heightDivision: String = "") {
+        _participants.value = _participants.value + Participant(handler, dog, utn, heightDivision = heightDivision)
         recordSidebarAction("Added $handler & $dog")
+        persistState()
     }
 
     fun clearParticipants() {
         _participants.value = emptyList()
         recordSidebarAction("Participants cleared")
-    }
-
-    fun moveToNextParticipant() {
-        if (_participants.value.size <= 1) return
-        val current = _participants.value.first()
-        _participants.value = _participants.value.drop(1) + current
-        recordSidebarAction("Next participant")
+        persistState()
     }
 
     fun moveToPreviousParticipant() {
@@ -135,25 +185,31 @@ class FourWayPlayScreenModel : ScreenModel {
         val last = list.last()
         _participants.value = listOf(last) + list.dropLast(1)
         recordSidebarAction("Previous participant")
+        persistState()
     }
 
     fun skipParticipant() {
         moveToNextParticipant()
         recordSidebarAction("Participant skipped")
+        persistState()
     }
 
     fun importParticipantsFromCsv(csvText: String) {
         val imported = parseCsv(csvText)
-        val participants = imported.map { Participant(it.handler, it.dog, it.utn) }
+        val participants = imported.map { Participant(it.handler, it.dog, it.utn, it.heightDivision) }
         _participants.value = participants
+        _completed.value = emptyList()
         recordSidebarAction("Imported ${participants.size} from CSV")
+        persistState()
     }
 
     fun importParticipantsFromXlsx(xlsxData: ByteArray) {
         val imported = parseXlsx(xlsxData)
-        val participants = imported.map { Participant(it.handler, it.dog, it.utn) }
+        val participants = imported.map { Participant(it.handler, it.dog, it.utn, it.heightDivision) }
         _participants.value = participants
+        _completed.value = emptyList()
         recordSidebarAction("Imported ${participants.size} from XLSX")
+        persistState()
     }
 
     fun exportParticipantsAsCsv(): String {
@@ -174,26 +230,39 @@ class FourWayPlayScreenModel : ScreenModel {
     }
 
     fun undo() {
-        if (undoStack.isEmpty()) return
-        val snapshot = undoStack.removeLast()
-        _score.value = snapshot.score
-        _quads.value = snapshot.quads
-        _clickedZones.value = snapshot.clickedZones
-        _sweetSpotClicked.value = snapshot.sweetSpot
-        _misses.value = snapshot.misses
+        if (undoStack.isNotEmpty()) {
+            val snapshot = undoStack.removeLast()
+            _score.value = snapshot.score
+            _quads.value = snapshot.quads
+            _clickedZones.value = snapshot.clickedZones
+            _sweetSpotClicked.value = snapshot.sweetSpot
+            _misses.value = snapshot.misses
+        }
     }
 
     private fun pushSnapshot() {
-        val snapshot = Snapshot(
+        if (undoStack.size >= snapshotLimit) undoStack.removeFirst()
+        undoStack.add(Snapshot(
             score = _score.value,
             quads = _quads.value,
             clickedZones = _clickedZones.value,
             sweetSpot = _sweetSpotClicked.value,
             misses = _misses.value
-        )
-        undoStack.addLast(snapshot)
-        if (undoStack.size > snapshotLimit) {
-            undoStack.removeFirst()
-        }
+        ))
+    }
+
+    fun toggleSweetSpot() {
+        pushSnapshot()
+        _sweetSpotClicked.value = !_sweetSpotClicked.value
+        if (_sweetSpotClicked.value) _score.value += 1 else _score.value -= 1 // Example scoring
+    }
+
+    fun addMiss() {
+        pushSnapshot()
+        _misses.value += 1
+    }
+
+    fun flipField() {
+        _fieldFlipped.value = !_fieldFlipped.value
     }
 }

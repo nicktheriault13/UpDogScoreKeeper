@@ -2,12 +2,20 @@ package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 enum class SpacedOutZone(val label: String) {
     Zone1("1"), Zone2("2"), Zone3("3"), Zone4("4"), Zone5("5"),
@@ -15,12 +23,13 @@ enum class SpacedOutZone(val label: String) {
     Zone11("11"), Zone12("12"), Zone13("13"), Zone14("14"), Zone15("15")
 }
 
+@Serializable
 data class SpacedOutParticipant(
     val handler: String,
     val dog: String,
     val utn: String
 ) {
-    val displayName: String = buildString {
+    fun displayName(): String = buildString {
         if (handler.isNotBlank()) append(handler.trim())
         if (dog.isNotBlank()) {
             if (isNotEmpty()) append(" & ")
@@ -29,6 +38,7 @@ data class SpacedOutParticipant(
     }.ifBlank { handler.ifBlank { dog.ifBlank { "Unknown Team" } } }
 }
 
+@Serializable
 data class SpacedOutRoundResult(
     val participant: SpacedOutParticipant,
     val score: Int,
@@ -39,7 +49,32 @@ data class SpacedOutRoundResult(
     val sweetSpotBonus: Boolean
 )
 
+@Serializable
+data class SpacedOutUiState(
+    val activeParticipant: SpacedOutParticipant? = null,
+    val queue: List<SpacedOutParticipant> = emptyList(),
+    val completed: List<SpacedOutRoundResult> = emptyList(),
+    val score: Int = 0,
+    val spacedOutCount: Int = 0,
+    val zonesCaught: Int = 0,
+    val misses: Int = 0,
+    val ob: Int = 0,
+    val sweetSpotBonus: Boolean = false,
+    val fieldFlipped: Boolean = false,
+    val clickedZones: Set<SpacedOutZone> = emptySet(),
+    val logEntries: List<String> = emptyList()
+)
+
 class SpacedOutScreenModel : ScreenModel {
+
+    // Timer State
+    private val _timeLeft = MutableStateFlow(60)
+    public val timeLeft: StateFlow<Int> = _timeLeft.asStateFlow()
+    private val _timerRunning = MutableStateFlow(false)
+    public val timerRunning: StateFlow<Boolean> = _timerRunning.asStateFlow()
+    private var timerJob: Job? = null
+
+    private var logCounter = 0
 
     private val zonePoints = mapOf(
         SpacedOutZone.Zone1 to 1,
@@ -59,98 +94,128 @@ class SpacedOutScreenModel : ScreenModel {
         SpacedOutZone.Zone15 to 1
     )
 
-    private val _score = MutableStateFlow(0)
-    val score = _score.asStateFlow()
+    private val _uiState = MutableStateFlow(SpacedOutUiState())
 
-    private val _spacedOutCount = MutableStateFlow(0)
-    val spacedOutCount = _spacedOutCount.asStateFlow()
+    // Derived Flows for UI compatibility
+    public val score: StateFlow<Int> = _uiState.map { it.score }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    public val spacedOutCount: StateFlow<Int> = _uiState.map { it.spacedOutCount }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    public val zonesCaught: StateFlow<Int> = _uiState.map { it.zonesCaught }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    public val misses: StateFlow<Int> = _uiState.map { it.misses }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    public val ob: StateFlow<Int> = _uiState.map { it.ob }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    public val sweetSpotBonusOn: StateFlow<Boolean> = _uiState.map { it.sweetSpotBonus }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
+    public val fieldFlipped: StateFlow<Boolean> = _uiState.map { it.fieldFlipped }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
+    public val clickedZonesInRound: StateFlow<Set<SpacedOutZone>> = _uiState.map { it.clickedZones }.stateIn(screenModelScope, SharingStarted.Eagerly, emptySet())
+    public val activeParticipant: StateFlow<SpacedOutParticipant?> = _uiState.map { it.activeParticipant }.stateIn(screenModelScope, SharingStarted.Eagerly, null)
+    public val participantQueue: StateFlow<List<SpacedOutParticipant>> = _uiState.map { it.queue }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyList())
+    public val logEntries: StateFlow<List<String>> = _uiState.map { it.logEntries }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _misses = MutableStateFlow(0)
-    val misses = _misses.asStateFlow()
+    private var dataStore: DataStore? = null
+    private val persistenceKey = "SpacedOutData.json"
 
-    private val _ob = MutableStateFlow(0)
-    val ob = _ob.asStateFlow()
+    fun initPersistence(store: DataStore) {
+        dataStore = store
+        screenModelScope.launch {
+            val json = store.load(persistenceKey)
+            if (json != null) {
+                try {
+                    val saved = Json.decodeFromString<SpacedOutUiState>(json)
+                    _uiState.value = saved
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
 
-    private val _zonesCaught = MutableStateFlow(0)
-    val zonesCaught = _zonesCaught.asStateFlow()
-
-    private val _clickedZonesInRound = MutableStateFlow(emptySet<SpacedOutZone>())
-    val clickedZonesInRound = _clickedZonesInRound.asStateFlow()
-
-    private var lastZoneClicked: SpacedOutZone? = null
-
-    private val _sweetSpotBonusOn = MutableStateFlow(false)
-    val sweetSpotBonusOn = _sweetSpotBonusOn.asStateFlow()
-
-    private val _fieldFlipped = MutableStateFlow(false)
-    val fieldFlipped = _fieldFlipped.asStateFlow()
-
-    private val _activeParticipant = MutableStateFlow<SpacedOutParticipant?>(null)
-    val activeParticipant = _activeParticipant.asStateFlow()
-
-    private val _participantQueue = MutableStateFlow<List<SpacedOutParticipant>>(emptyList())
-    val participantQueue = _participantQueue.asStateFlow()
-
-    private val _completedResults = MutableStateFlow<List<SpacedOutRoundResult>>(emptyList())
-    val completedResults = _completedResults.asStateFlow()
-
-    private val _logEntries = MutableStateFlow<List<String>>(emptyList())
-    val logEntries = _logEntries.asStateFlow()
-
-    private val _timeLeft = MutableStateFlow(0)
-    val timeLeft = _timeLeft.asStateFlow()
-
-    private val _timerRunning = MutableStateFlow(false)
-    val timerRunning = _timerRunning.asStateFlow()
-
-    private var timerJob: Job? = null
-    private var logCounter = 0
-
-    init {
-        seedSampleParticipants()
+    private fun persistState() {
+        val store = dataStore ?: return
+        val state = _uiState.value
+        screenModelScope.launch {
+            try {
+                val json = Json.encodeToString(state)
+                store.save(persistenceKey, json)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun handleZoneClick(zone: SpacedOutZone) {
-        if (lastZoneClicked == zone) return
+        if (_uiState.value.activeParticipant == null) return
 
+        val currentScore = _uiState.value.score
         val points = zonePoints[zone] ?: return
-        _score.value += points
-        _zonesCaught.value += 1
+        val newScore = currentScore + points
 
-        if (zone !in _clickedZonesInRound.value) {
-            val newClickedZones = _clickedZonesInRound.value + zone
-            if (newClickedZones.size == zonePoints.size) {
-                awardSpacedOutBonus()
-            } else {
-                _clickedZonesInRound.value = newClickedZones
+        _uiState.update { currentState ->
+            val zonesCaught = currentState.zonesCaught + 1
+            val clickedZones = currentState.clickedZones + zone
+            val allZonesCaught = clickedZones.size == zonePoints.size
+
+            // Logic for Spaced Out Bonus? (e.g. all 15 zones)
+
+            var spacedOutCount = currentState.spacedOutCount
+            if (allZonesCaught && currentState.clickedZones.size < zonePoints.size) { // Just completed
+                 spacedOutCount += 1
+                 // Reset clicked zones? Or keep them? Usually "Spaced Out" means clear board and bonus.
+                 // Assuming Spaced Out clears clicked zones for next round.
+                 // If not, logic differs. Assuming reset based on "Spaced Out" name.
             }
+
+            currentState.copy(
+                score = newScore,
+                zonesCaught = zonesCaught,
+                spacedOutCount = spacedOutCount,
+                clickedZones = if (allZonesCaught) emptySet() else clickedZones
+            )
         }
-        lastZoneClicked = zone
+        if (_uiState.value.clickedZones.isEmpty() && _uiState.value.zonesCaught > 0) {
+             // Spaced Out triggered reset above?
+             appendLog("Spaced Out! Board Cleared.") // Example
+        }
+        persistState()
     }
 
     fun toggleSweetSpotBonus() {
-        if (!_sweetSpotBonusOn.value) {
-            _score.value += SWEET_SPOT_BONUS_POINTS
-            _sweetSpotBonusOn.value = true
-        } else {
-            _score.value = (_score.value - SWEET_SPOT_BONUS_POINTS).coerceAtLeast(0)
-            _sweetSpotBonusOn.value = false
+        _uiState.update { currentState ->
+            val newScore = if (!currentState.sweetSpotBonus) {
+                currentState.score + SWEET_SPOT_BONUS_POINTS
+            } else {
+                (currentState.score - SWEET_SPOT_BONUS_POINTS).coerceAtLeast(0)
+            }
+            currentState.copy(
+                score = newScore,
+                sweetSpotBonus = !currentState.sweetSpotBonus
+            )
         }
+        persistState()
     }
 
     fun incrementMisses() {
-        _misses.value++
+        _uiState.update { currentState ->
+            val newMisses = currentState.misses + 1
+            currentState.copy(misses = newMisses)
+        }
         appendLog("Miss recorded")
+        persistState()
     }
 
     fun incrementOb() {
-        _ob.value++
+        _uiState.update { currentState ->
+            val newOb = currentState.ob + 1
+            currentState.copy(ob = newOb)
+        }
         appendLog("OB recorded")
+        persistState()
     }
 
     fun flipField() {
-        _fieldFlipped.value = !_fieldFlipped.value
+        _uiState.update { currentState ->
+            val newFlippedState = !currentState.fieldFlipped
+            currentState.copy(fieldFlipped = newFlippedState)
+        }
         appendLog("Field flipped")
+        persistState()
     }
 
     fun zoneLabel(zone: SpacedOutZone): String = zone.label
@@ -159,32 +224,30 @@ class SpacedOutScreenModel : ScreenModel {
 
     fun reset() {
         stopTimer()
-        _score.value = 0
-        _spacedOutCount.value = 0
-        _misses.value = 0
-        _ob.value = 0
-        _zonesCaught.value = 0
-        resetRoundState()
-        _sweetSpotBonusOn.value = false
+        _uiState.value = SpacedOutUiState()
         appendLog("Round reset")
+        persistState()
     }
 
     fun addParticipant(handler: String, dog: String, utn: String) {
         val participant = SpacedOutParticipant(handler, dog, utn)
-        if (_activeParticipant.value == null) {
-            _activeParticipant.value = participant
-        } else {
-            _participantQueue.update { it + participant }
+        _uiState.update { currentState ->
+            if (currentState.activeParticipant == null) {
+                currentState.copy(activeParticipant = participant)
+            } else {
+                val updatedQueue = currentState.queue + participant
+                currentState.copy(queue = updatedQueue)
+            }
         }
-        appendLog("Added ${participant.displayName}")
+        appendLog("Added ${participant.displayName()}")
+        persistState()
     }
 
     fun clearParticipants() {
-        _activeParticipant.value = null
-        _participantQueue.value = emptyList()
-        _completedResults.value = emptyList()
+        _uiState.value = SpacedOutUiState()
         reset()
         appendLog("Participants cleared")
+        persistState()
     }
 
     fun importParticipantsFromCsv(csvText: String) {
@@ -201,18 +264,21 @@ class SpacedOutScreenModel : ScreenModel {
 
     private fun applyImportedPlayers(players: List<SpacedOutParticipant>) {
         if (players.isEmpty()) return
-        _participantQueue.value = players.drop(1)
-        _activeParticipant.value = players.first()
+        _uiState.value = SpacedOutUiState(
+            activeParticipant = players.first(),
+            queue = players.drop(1)
+        )
         // Reset logs/history if needed
         appendLog("Imported ${players.size} teams")
         reset()
+        persistState()
     }
 
     fun exportParticipantsAsCsv(): String {
         val header = "Handler,Dog,UTN,Score,SpacedOut,ZonesCaught,Misses,OB,SweetSpot"
         val rows = buildList {
-            _activeParticipant.value?.let { add(buildRoundResult(it)) }
-            _participantQueue.value.forEach { participant ->
+            _uiState.value.activeParticipant?.let { add(buildRoundResult(it)) }
+            _uiState.value.queue.forEach { participant ->
                 add(
                     SpacedOutRoundResult(
                         participant = participant,
@@ -225,7 +291,7 @@ class SpacedOutScreenModel : ScreenModel {
                     )
                 )
             }
-            addAll(_completedResults.value)
+            addAll(_uiState.value.completed)
         }
 
         return buildString {
@@ -248,32 +314,53 @@ class SpacedOutScreenModel : ScreenModel {
         }
     }
 
-    fun exportLog(): String = _logEntries.value.joinToString(separator = "\n")
+    fun exportLog(): String = logEntries.value.joinToString(separator = "\n")
 
     fun nextParticipant() {
-        val active = _activeParticipant.value ?: return
-        _completedResults.update { it + buildRoundResult(active) }
-        appendLog("Completed ${active.displayName}")
-        promoteNextParticipant()
+        val active = _uiState.value.activeParticipant ?: return
+        _uiState.update { currentState ->
+            val updatedCompleted = currentState.completed + buildRoundResult(active)
+            val updatedQueue = currentState.queue.drop(1)
+            val nextActive = updatedQueue.firstOrNull()
+            currentState.copy(
+                completed = updatedCompleted,
+                activeParticipant = nextActive,
+                queue = updatedQueue
+            )
+        }
+        appendLog("Completed ${active.displayName()}")
+        persistState()
     }
 
     fun skipParticipant() {
-        val active = _activeParticipant.value ?: return
-        _participantQueue.update { it + active }
-        appendLog("Skipped ${active.displayName}")
-        promoteNextParticipant()
+        val active = _uiState.value.activeParticipant ?: return
+        _uiState.update { currentState ->
+            val updatedQueue = currentState.queue + active
+            val nextActive = updatedQueue.firstOrNull()
+            currentState.copy(
+                activeParticipant = nextActive,
+                queue = updatedQueue
+            )
+        }
+        appendLog("Skipped ${active.displayName()}")
+        persistState()
     }
 
     fun previousParticipant() {
-        val current = _activeParticipant.value ?: return
-        val queue = _participantQueue.value
+        val current = _uiState.value.activeParticipant ?: return
+        val queue = _uiState.value.queue
         if (queue.isEmpty()) return
         val last = queue.last()
         val remaining = queue.dropLast(1)
-        _activeParticipant.value = last
-        _participantQueue.value = listOf(current) + remaining
+        _uiState.update { currentState ->
+            currentState.copy(
+                activeParticipant = last,
+                queue = listOf(current) + remaining
+            )
+        }
         reset()
         appendLog("Moved to previous participant")
+        persistState()
     }
 
     fun startTimer(durationSeconds: Int = DEFAULT_TIMER_SECONDS) {
@@ -311,45 +398,41 @@ class SpacedOutScreenModel : ScreenModel {
     }
 
     private fun awardSpacedOutBonus() {
-        _score.value += SPACED_OUT_COMPLETION_BONUS
-        _spacedOutCount.value++
+        _uiState.update { currentState ->
+            val newScore = currentState.score + SPACED_OUT_COMPLETION_BONUS
+            currentState.copy(
+                score = newScore,
+                spacedOutCount = currentState.spacedOutCount + 1
+            )
+        }
         appendLog("Spaced Out achieved")
         resetRoundState()
+        persistState()
     }
 
     private fun resetRoundState() {
-        _clickedZonesInRound.value = emptySet()
-        lastZoneClicked = null
-    }
-
-    private fun promoteNextParticipant() {
-        val queue = _participantQueue.value
-        if (queue.isEmpty()) {
-            _activeParticipant.value = null
-            reset()
-            return
+        _uiState.update { currentState ->
+            currentState.copy(queue = emptyList(), activeParticipant = null)
         }
-        _activeParticipant.value = queue.first()
-        _participantQueue.value = queue.drop(1)
-        reset()
+        persistState()
     }
 
     private fun buildRoundResult(participant: SpacedOutParticipant): SpacedOutRoundResult =
         SpacedOutRoundResult(
             participant = participant,
-            score = _score.value,
-            spacedOutCount = _spacedOutCount.value,
-            zonesCaught = _zonesCaught.value,
-            misses = _misses.value,
-            ob = _ob.value,
-            sweetSpotBonus = _sweetSpotBonusOn.value
+            score = _uiState.value.score,
+            spacedOutCount = _uiState.value.spacedOutCount,
+            zonesCaught = _uiState.value.zonesCaught,
+            misses = _uiState.value.misses,
+            ob = _uiState.value.ob,
+            sweetSpotBonus = _uiState.value.sweetSpotBonus
         )
 
     private fun appendLog(message: String) {
         logCounter = (logCounter + 1) % 10000
-        val team = _activeParticipant.value?.displayName ?: "No team"
+        val team = _uiState.value.activeParticipant?.displayName() ?: "No team"
         val entry = "#${logCounter.toString().padStart(4, '0')} [$team] $message"
-        _logEntries.update { listOf(entry) + it }
+        _uiState.update { it.copy(logEntries = listOf(entry) + it.logEntries) }
     }
 
     private fun seedSampleParticipants() {
@@ -358,8 +441,10 @@ class SpacedOutScreenModel : ScreenModel {
             SpacedOutParticipant("Jamie Reed", "Skye", "UTN-002"),
             SpacedOutParticipant("Morgan Lee", "Nova", "UTN-003")
         )
-        _activeParticipant.value = sample.firstOrNull()
-        _participantQueue.value = sample.drop(1)
+        _uiState.value = SpacedOutUiState(
+            activeParticipant = sample.firstOrNull(),
+            queue = sample.drop(1)
+        )
     }
 
     private companion object {
@@ -368,3 +453,4 @@ class SpacedOutScreenModel : ScreenModel {
         private const val DEFAULT_TIMER_SECONDS = 60
     }
 }
+

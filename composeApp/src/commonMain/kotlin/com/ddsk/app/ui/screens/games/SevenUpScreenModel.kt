@@ -2,111 +2,159 @@ package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.math.max
 import kotlin.time.TimeSource
 
+@Serializable
 data class SevenUpParticipant(
     val handler: String,
     val dog: String,
     val utn: String
 )
 
+@Serializable
+data class SevenUpUiState(
+    val score: Int = 0,
+    val jumpCounts: Map<String, Int> = emptyMap(),
+    val disabledJumps: Set<String> = emptySet(),
+    val jumpStreak: Int = 0,
+    val markedCells: Map<String, Int> = emptyMap(),
+    val nonJumpMark: Int = 1,
+    val lastWasNonJump: Boolean = false,
+    val sweetSpotBonus: Boolean = false,
+    val hasStarted: Boolean = false,
+    val rectangleVersion: Int = 0,
+    val isFlipped: Boolean = false,
+    val timeRemaining: Float = 60.0f,
+    val isTimerRunning: Boolean = false,
+    val activeParticipant: SevenUpParticipant? = null,
+    val queue: List<SevenUpParticipant> = emptyList(),
+    val completed: List<SevenUpParticipant> = emptyList() // Needs more robust result structure if stats needed on completed
+)
+
 class SevenUpScreenModel : ScreenModel {
 
-    private val _score = MutableStateFlow(0)
-    val score = _score.asStateFlow()
+    // Replacing separate flows with centralized UI state flow for persistence consistency
+    private val _uiState = MutableStateFlow(SevenUpUiState())
+    // Need to expose individual flows if UI consumes them individually, OR refactor UI to consume state object.
+    // Keeping existing separate flow variables as derived properties OR computed flows to minimize UI refactor.
 
-    // Jump tracking
-    private val _jumpCounts = MutableStateFlow(mapOf<String, Int>()) 
-    val jumpCounts = _jumpCounts.asStateFlow()
-    private val _disabledJumps = MutableStateFlow(emptySet<String>())
-    val disabledJumps = _disabledJumps.asStateFlow()
-    private val _jumpStreak = MutableStateFlow(0)
-    val jumpStreak = _jumpStreak.asStateFlow()
+    // Actually, simply adding persistence to existing variables might be complex if I don't group them.
+    // Let's proxy them.
+    val score = _uiState.map { it.score }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    val jumpCounts = _uiState.map { it.jumpCounts }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyMap())
+    val disabledJumps = _uiState.map { it.disabledJumps }.stateIn(screenModelScope, SharingStarted.Eagerly, emptySet())
+    val jumpStreak = _uiState.map { it.jumpStreak }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    val markedCells = _uiState.map { it.markedCells }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyMap())
+    val nonJumpMark = _uiState.map { it.nonJumpMark }.stateIn(screenModelScope, SharingStarted.Eagerly, 1)
+    val lastWasNonJump = _uiState.map { it.lastWasNonJump }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
+    val sweetSpotBonus = _uiState.map { it.sweetSpotBonus }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
+    val hasStarted = _uiState.map { it.hasStarted }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
+    val rectangleVersion = _uiState.map { it.rectangleVersion }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    val isFlipped = _uiState.map { it.isFlipped }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
+    val timeRemaining = _uiState.map { it.timeRemaining }.stateIn(screenModelScope, SharingStarted.Eagerly, 60.0f)
+    val isTimerRunning = _uiState.map { it.isTimerRunning }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
 
-    // Non-jump tracking
-    private val _markedCells = MutableStateFlow(mapOf<String, Int>())
-    val markedCells = _markedCells.asStateFlow()
-    private val _nonJumpMark = MutableStateFlow(1)
-    val nonJumpMark = _nonJumpMark.asStateFlow()
-    private val _lastWasNonJump = MutableStateFlow(false)
-    val lastWasNonJump = _lastWasNonJump.asStateFlow()
-    private val _sweetSpotBonus = MutableStateFlow(false)
-    val sweetSpotBonus = _sweetSpotBonus.asStateFlow()
-
-    private val _hasStarted = MutableStateFlow(false)
-    val hasStarted = _hasStarted.asStateFlow()
-
-    // Layout and Timer
-    private val _rectangleVersion = MutableStateFlow(0)
-    val rectangleVersion = _rectangleVersion.asStateFlow()
-    private val _isFlipped = MutableStateFlow(false)
-    val isFlipped = _isFlipped.asStateFlow()
-    private val _timeRemaining = MutableStateFlow(60.0f)
-    val timeRemaining = _timeRemaining.asStateFlow()
-    private val _isTimerRunning = MutableStateFlow(false)
-    val isTimerRunning = _isTimerRunning.asStateFlow()
-
-    private val _activeParticipant = MutableStateFlow<SevenUpParticipant?>(null)
-    val activeParticipant = _activeParticipant.asStateFlow()
-
-    private val _participantQueue = MutableStateFlow<List<SevenUpParticipant>>(emptyList())
-    val participantQueue = _participantQueue.asStateFlow()
+    // New flows for participants
+    val participants = _uiState.map { it.queue }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyList())
+    val activeParticipant = _uiState.map { it.activeParticipant }.stateIn(screenModelScope, SharingStarted.Eagerly, null)
 
     private var timerJob: Job? = null
-    private var startTimeMark: TimeSource.Monotonic.ValueTimeMark? = null
-    private var initialTimeOnStart = 60.0f
+    private var dataStore: DataStore? = null
+    private val persistenceKey = "SevenUpData.json"
+
+    fun initPersistence(store: DataStore) {
+        dataStore = store
+        screenModelScope.launch {
+            val json = store.load(persistenceKey)
+            if (json != null) {
+                try {
+                    val saved = Json.decodeFromString<SevenUpUiState>(json)
+                    _uiState.value = saved
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    private fun persistState() {
+        val store = dataStore ?: return
+        val state = _uiState.value
+        screenModelScope.launch {
+            try {
+                val json = Json.encodeToString(state)
+                store.save(persistenceKey, json)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     fun handleCellPress(label: String, row: Int, col: Int) {
         val cellKey = "$row,$col"
         if (label.startsWith("Jump")) {
-            if (!_hasStarted.value) _hasStarted.value = true
-            if (label in _disabledJumps.value) return
-            if (_jumpStreak.value >= 3) return
+            if (!_uiState.value.hasStarted) _uiState.update { it.copy(hasStarted = true) }
+            if (label in _uiState.value.disabledJumps) return
+            if (_uiState.value.jumpStreak >= 3) return
 
-            _jumpStreak.value++
-            _disabledJumps.value += label
-            _jumpCounts.value += (label to (_jumpCounts.value[label] ?: 0) + 1)
-            _score.value += 3
-            _lastWasNonJump.value = false
-
-        } else { // Non-jump cell
-            if (!_hasStarted.value || _lastWasNonJump.value) return
-            if (cellKey in _markedCells.value) return
-            if (_nonJumpMark.value > 5) return
-
-            _markedCells.value += (cellKey to _nonJumpMark.value)
-            
-            if (_nonJumpMark.value == 5 && label == "Sweet Spot") {
-                _score.value += 8 // 1 for non-jump + 7 bonus
-                _sweetSpotBonus.value = true
-            } else {
-                _score.value += 1
+            _uiState.update {
+                it.copy(
+                    jumpStreak = it.jumpStreak + 1,
+                    disabledJumps = it.disabledJumps + label,
+                    jumpCounts = it.jumpCounts + (label to (it.jumpCounts[label] ?: 0) + 1),
+                    score = it.score + 3,
+                    lastWasNonJump = false
+                )
             }
 
-            _nonJumpMark.value++
-            _jumpStreak.value = 0
-            _disabledJumps.value = emptySet()
-            _lastWasNonJump.value = true
+        } else { // Non-jump cell
+            if (!_uiState.value.hasStarted || _uiState.value.lastWasNonJump) return
+            if (cellKey in _uiState.value.markedCells) return
+            if (_uiState.value.nonJumpMark > 5) return
+
+            _uiState.update { state ->
+                val newScore = state.nonJumpMark.let { if (it == 5 && label == "Sweet Spot") it + 7 else 1 }
+                state.copy(
+                    markedCells = state.markedCells + (cellKey to state.nonJumpMark),
+                    score = state.score + newScore,
+                    nonJumpMark = state.nonJumpMark + 1,
+                    jumpStreak = 0,
+                    disabledJumps = emptySet(),
+                    lastWasNonJump = true
+                )
+            }
         }
+        persistState()
     }
 
     fun startTimer() {
-        if (!_isTimerRunning.value) {
-            _isTimerRunning.value = true
-            startTimeMark = TimeSource.Monotonic.markNow()
-            initialTimeOnStart = _timeRemaining.value
+        if (!_uiState.value.isTimerRunning) {
+            _uiState.update { it.copy(isTimerRunning = true) }
+            val startTimeMark = TimeSource.Monotonic.markNow()
+            val initialTimeOnStart = _uiState.value.timeRemaining
             timerJob = screenModelScope.launch {
-                while (_isTimerRunning.value) {
-                    val elapsedSeconds = startTimeMark!!.elapsedNow().inWholeMilliseconds / 1000f
-                    _timeRemaining.value = max(0f, initialTimeOnStart - elapsedSeconds)
-                    if (_timeRemaining.value <= 0f) stopTimer()
+                while (_uiState.value.isTimerRunning) {
+                    val elapsedSeconds = startTimeMark.elapsedNow().inWholeMilliseconds / 1000f
+                    _uiState.update {
+                        it.copy(
+                            timeRemaining = max(0f, initialTimeOnStart - elapsedSeconds)
+                        )
+                    }
+                    if (_uiState.value.timeRemaining <= 0f) stopTimer()
                     delay(10L)
                 }
             }
@@ -115,41 +163,33 @@ class SevenUpScreenModel : ScreenModel {
 
     fun stopTimer() {
         timerJob?.cancel()
-        _isTimerRunning.value = false
-        _score.value += _timeRemaining.value.toInt()
+        _uiState.update { it.copy(isTimerRunning = false, score = it.score + it.timeRemaining.toInt()) }
+        persistState()
     }
 
     fun setTimeManually(timeStr: String) {
         val newTime = timeStr.toFloatOrNull() ?: return
         timerJob?.cancel()
-        _isTimerRunning.value = false
-        _timeRemaining.value = newTime
-        _score.value += newTime.toInt()
+        _uiState.update { it.copy(timeRemaining = newTime, isTimerRunning = false, score = it.score + newTime.toInt()) }
+        persistState()
     }
 
     fun cycleRectangleVersion() {
-        if (!_hasStarted.value) {
-            _rectangleVersion.value = (_rectangleVersion.value + 1) % 11 // 11 versions from the code
+        if (!_uiState.value.hasStarted) {
+            _uiState.update { it.copy(rectangleVersion = (it.rectangleVersion + 1) % 11) }
+            persistState()
         }
     }
 
     fun flipField() {
-        _isFlipped.value = !_isFlipped.value
+        _uiState.update { it.copy(isFlipped = !_uiState.value.isFlipped) }
+        persistState()
     }
 
     fun reset() {
-        _score.value = 0
-        _jumpCounts.value = emptyMap()
-        _disabledJumps.value = emptySet()
-        _jumpStreak.value = 0
-        _hasStarted.value = false
-        _markedCells.value = emptyMap()
-        _nonJumpMark.value = 1
-        _lastWasNonJump.value = false
-        _sweetSpotBonus.value = false
-        _timeRemaining.value = 60.0f
+        _uiState.value = SevenUpUiState() // Reset to default state
         timerJob?.cancel()
-        _isTimerRunning.value = false
+        persistState()
     }
 
     fun importParticipantsFromCsv(csvText: String) {
@@ -166,8 +206,12 @@ class SevenUpScreenModel : ScreenModel {
 
     private fun applyImportedPlayers(players: List<SevenUpParticipant>) {
         if (players.isEmpty()) return
-        _participantQueue.value = players.drop(1)
-        _activeParticipant.value = players.first()
+        _uiState.update { state ->
+            state.copy(
+                queue = players.drop(1),
+                activeParticipant = players.first()
+            )
+        }
         reset()
     }
 }

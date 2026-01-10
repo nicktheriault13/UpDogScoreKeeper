@@ -8,16 +8,16 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
@@ -29,6 +29,7 @@ import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,17 +46,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.koin.getScreenModel
+import com.ddsk.app.persistence.rememberDataStore
 import com.ddsk.app.ui.theme.Palette
-import com.ddsk.app.ui.screens.games.FireballGridPoint
 import kotlinx.coroutines.launch
 
 object FireballScreen : Screen {
-
     @Composable
     override fun Content() {
-        val screenModel = getScreenModel<FireballScreenModel>()
+        val screenModel = rememberScreenModel { FireballScreenModel() }
+        val dataStore = rememberDataStore()
+        LaunchedEffect(Unit) {
+            screenModel.initPersistence(dataStore)
+        }
+
         val totalScore by screenModel.totalScore.collectAsState()
         val currentBoardScore by screenModel.currentBoardScore.collectAsState()
         val isFieldFlipped by screenModel.isFieldFlipped.collectAsState()
@@ -80,6 +85,8 @@ object FireballScreen : Screen {
 
         var showClearParticipantsDialog by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
+
+        val fileExporter = rememberFileExporter()
 
         val filePicker = rememberFilePicker { result ->
             scope.launch {
@@ -125,7 +132,12 @@ object FireballScreen : Screen {
                             collapsed = sidebarCollapsed,
                             onToggle = screenModel::toggleSidebar,
                             onImport = { filePicker.launch() },
-                            onExport = screenModel::exportScores,
+                            onExport = {
+                                scope.launch {
+                                    val json = screenModel.exportAsJson()
+                                    fileExporter.save("Fireball_Export.json", json.encodeToByteArray())
+                                }
+                            },
                             onHelp = screenModel::openHelp,
                             onClearBoard = screenModel::clearBoard,
                             onResetGame = screenModel::resetGame,

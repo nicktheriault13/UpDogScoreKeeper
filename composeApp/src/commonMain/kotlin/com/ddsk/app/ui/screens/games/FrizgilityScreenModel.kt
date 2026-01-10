@@ -2,6 +2,7 @@ package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.ddsk.app.persistence.DataStore
 import kotlin.math.max
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -9,6 +10,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class FrizgilityScreenModel : ScreenModel {
 
@@ -27,18 +31,51 @@ class FrizgilityScreenModel : ScreenModel {
     private val _logEntries = MutableStateFlow<List<String>>(emptyList())
     val logEntries = _logEntries.asStateFlow()
 
+    private var dataStore: DataStore? = null
+    private val persistenceKey = "FrizgilityData.json"
+
+    fun initPersistence(store: DataStore) {
+        dataStore = store
+        screenModelScope.launch {
+            val json = store.load(persistenceKey)
+            if (json != null) {
+                try {
+                    val saved = Json.decodeFromString<FrizgilityUiState>(json)
+                    _uiState.value = saved
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    private fun persistState() {
+        val store = dataStore ?: return
+        val state = _uiState.value
+        screenModelScope.launch {
+            try {
+                val json = Json.encodeToString(state)
+                store.save(persistenceKey, json)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     fun toggleSweetSpot() {
         pushUndo()
         _uiState.update { state ->
             state.copy(sweetSpotActive = !state.sweetSpotActive)
         }
         appendLog("Sweet Spot toggled")
+        persistState()
     }
 
     fun toggleAllRollers() {
         pushUndo()
         _uiState.update { state -> state.copy(allRollersEnabled = !state.allRollersEnabled) }
         appendLog("All Rollers toggled")
+        persistState()
     }
 
     fun handleObstacleClick(lane: Int) {
@@ -67,6 +104,7 @@ class FrizgilityScreenModel : ScreenModel {
             }
         }
         appendLog("Obstacle lane $lane pressed")
+        persistState()
     }
 
     fun handleFailClick(lane: Int) {
@@ -95,6 +133,7 @@ class FrizgilityScreenModel : ScreenModel {
             }
         }
         appendLog("Fail lane $lane pressed")
+        persistState()
     }
 
     fun handleCatchClick(points: Int) {
@@ -113,6 +152,7 @@ class FrizgilityScreenModel : ScreenModel {
             updatedState.resetRound()
         }
         appendLog("Catch button ${if (points == 3) "3-10" else "10+"} pressed")
+        persistState()
     }
 
     fun handleMissClick() {
@@ -135,6 +175,7 @@ class FrizgilityScreenModel : ScreenModel {
             }
         }
         appendLog("Miss button pressed")
+        persistState()
     }
 
     fun resetGame() {
@@ -153,6 +194,7 @@ class FrizgilityScreenModel : ScreenModel {
         _timeLeft.value = DEFAULT_TIMER_SECONDS
         stopTimer()
         appendLog("Game reset")
+        persistState()
     }
 
     fun importParticipantsFromCsv(csvText: String) {
@@ -177,6 +219,7 @@ class FrizgilityScreenModel : ScreenModel {
         }
         resetGame()
         appendLog("Imported ${players.size} participants")
+        persistState()
     }
 
     fun exportParticipantsSnapshot(): String {
@@ -195,6 +238,7 @@ class FrizgilityScreenModel : ScreenModel {
                 )
             }
             resetGame()
+            persistState()
         }
     }
 
@@ -205,14 +249,17 @@ class FrizgilityScreenModel : ScreenModel {
     fun addParticipant(handler: String, dog: String, utn: String) {
         val newParticipant = FrizgilityParticipant(handler, dog, utn)
         _uiState.update { it.copy(participants = it.participants + newParticipant) }
+        persistState()
     }
 
     fun clearParticipants() {
         _uiState.update { it.copy(participants = emptyList(), activeParticipantIndex = 0) }
+        persistState()
     }
 
     fun toggleSidebar() {
         _uiState.update { it.copy(sidebarCollapsed = !it.sidebarCollapsed) }
+        persistState()
     }
 
     fun undo() {
@@ -220,6 +267,7 @@ class FrizgilityScreenModel : ScreenModel {
         val previous = undoStack.removeFirst()
         _uiState.value = previous
         appendLog("Undo applied")
+        persistState()
     }
 
     fun startTimer(durationSeconds: Int = DEFAULT_TIMER_SECONDS) {
@@ -281,6 +329,7 @@ class FrizgilityScreenModel : ScreenModel {
         logCounter += 1
         val entry = "[${logCounter.toString().padStart(3, '0')}] $message"
         _logEntries.update { listOf(entry) + it }
+        // Note: logs are currently not persisted in state, but could be
     }
 
     companion object {
@@ -289,12 +338,14 @@ class FrizgilityScreenModel : ScreenModel {
     }
 }
 
+@Serializable
 data class FrizgilityParticipant(
     val handler: String,
     val dog: String,
     val utn: String,
 )
 
+@Serializable
 data class FrizgilityCounters(
     val obstacle1: Int = 0,
     val obstacle2: Int = 0,
@@ -307,6 +358,7 @@ data class FrizgilityCounters(
     val miss: Int = 0
 )
 
+@Serializable
 data class ScoreBreakdown(
     val obstacle1: Int,
     val obstacle2: Int,
@@ -321,6 +373,7 @@ data class ScoreBreakdown(
     val totalScore: Int
 )
 
+@Serializable
 data class FrizgilityUiState(
     val counters: FrizgilityCounters = FrizgilityCounters(),
     val sweetSpotActive: Boolean = false,
@@ -338,7 +391,7 @@ data class FrizgilityUiState(
     ),
     val activeParticipantIndex: Int = 0
 ) {
-    val scoreBreakdown: ScoreBreakdown = counters.toScoreBreakdown(sweetSpotActive)
+    val scoreBreakdown: ScoreBreakdown get() = counters.toScoreBreakdown(sweetSpotActive)
     val activeParticipant: FrizgilityParticipant?
         get() = participants.getOrNull(activeParticipantIndex)
     val queue: List<FrizgilityParticipant>

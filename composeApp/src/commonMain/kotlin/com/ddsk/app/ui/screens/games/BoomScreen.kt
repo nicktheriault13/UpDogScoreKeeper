@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.persistence.rememberDataStore
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
 
@@ -78,6 +79,10 @@ object BoomScreen : Screen {
     @Composable
     override fun Content() {
         val screenModel = rememberScreenModel { BoomScreenModel() }
+        val dataStore = rememberDataStore()
+        LaunchedEffect(Unit) {
+            screenModel.initPersistence(dataStore)
+        }
         val uiState by screenModel.uiState.collectAsState()
         val timerRunning by screenModel.timerRunning.collectAsState()
         val timeLeft by screenModel.timeLeft.collectAsState()

@@ -2,17 +2,22 @@ package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.collections.ArrayDeque
 
 private const val MAX_UNDO_LEVELS = 250
 private const val DEFAULT_TIMER_SECONDS = 60
 
+@Serializable
 data class ThrowNGoRoundStats(
     val score: Int,
     val catches: Int,
@@ -33,13 +38,14 @@ private fun ThrowNGoRoundStats(scoreState: ThrowNGoScoreState): ThrowNGoRoundSta
     allRollers = scoreState.allRollersActive
 )
 
+@Serializable
 data class ThrowNGoParticipant(
     val handler: String,
     val dog: String,
     val utn: String,
     val results: ThrowNGoRoundStats? = null
 ) {
-    val displayName: String = buildString {
+    val displayName: String get() = buildString { // Changed to property getter to avoid serialization issues
         append(handler.ifBlank { "Handler" })
         if (dog.isNotBlank()) {
             append(" & ")
@@ -48,6 +54,7 @@ data class ThrowNGoParticipant(
     }
 }
 
+@Serializable
 data class ThrowNGoScoreState(
     val score: Int = 0,
     val catches: Int = 0,
@@ -58,6 +65,7 @@ data class ThrowNGoScoreState(
     val allRollersActive: Boolean = false
 )
 
+@Serializable
 data class ThrowNGoUiState(
     val scoreState: ThrowNGoScoreState = ThrowNGoScoreState(),
     val activeParticipant: ThrowNGoParticipant? = null,
@@ -74,6 +82,41 @@ class ThrowNGoScreenModel : ScreenModel {
     private val _uiState = MutableStateFlow(ThrowNGoUiState())
     val uiState = _uiState.asStateFlow()
 
+    private var dataStore: DataStore? = null
+    private val persistenceKey = "ThrowNGoData.json"
+
+    fun initPersistence(store: DataStore) {
+        dataStore = store
+        screenModelScope.launch {
+            val json = store.load(persistenceKey)
+            if (json != null) {
+                try {
+                    val saved = Json.decodeFromString<ThrowNGoUiState>(json)
+                    _uiState.value = saved
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            } else {
+                if (_uiState.value.activeParticipant == null) {
+                    seedParticipants()
+                }
+            }
+        }
+    }
+
+    private fun persistState() {
+        val store = dataStore ?: return
+        val state = _uiState.value
+        screenModelScope.launch {
+            try {
+                val json = Json.encodeToString(state)
+                store.save(persistenceKey, json)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     private val _timerRunning = MutableStateFlow(false)
     val timerRunning = _timerRunning.asStateFlow()
 
@@ -85,9 +128,7 @@ class ThrowNGoScreenModel : ScreenModel {
     private var logCounter = 0
 
     init {
-        if (_uiState.value.activeParticipant == null) {
-            seedParticipants()
-        }
+        // seedParticipants() // Removed from init, moved to initPersistence
     }
 
     fun recordThrow(points: Int, isBonusRow: Boolean) {
@@ -103,6 +144,7 @@ class ThrowNGoScreenModel : ScreenModel {
                 logEntries = state.logEntries + logLine("Catch for +$points pts")
             )
         }
+        persistState()
     }
 
     fun toggleSweetSpot() {
@@ -119,6 +161,7 @@ class ThrowNGoScreenModel : ScreenModel {
                 logEntries = state.logEntries + logLine(if (activating) "Sweet Spot ON" else "Sweet Spot OFF")
             )
         }
+        persistState()
     }
 
     fun incrementMiss() {
@@ -129,6 +172,7 @@ class ThrowNGoScreenModel : ScreenModel {
                 logEntries = state.logEntries + logLine("Miss recorded")
             )
         }
+        persistState()
     }
 
     fun incrementOb() {
@@ -143,6 +187,7 @@ class ThrowNGoScreenModel : ScreenModel {
                 logEntries = state.logEntries + logLine("OB recorded")
             )
         }
+        persistState()
     }
 
     fun toggleAllRollers() {
@@ -154,6 +199,7 @@ class ThrowNGoScreenModel : ScreenModel {
                 logEntries = state.logEntries + logLine(if (toggled) "All Rollers enabled" else "All Rollers disabled")
             )
         }
+        persistState()
     }
 
     fun resetRound() {
@@ -164,15 +210,18 @@ class ThrowNGoScreenModel : ScreenModel {
                 logEntries = state.logEntries + logLine("Round reset")
             )
         }
+        persistState()
     }
 
     fun flipField() {
         _uiState.update { it.copy(fieldFlipped = !it.fieldFlipped) }
+        persistState()
     }
 
     fun undo() {
         val previous = undoStack.removeLastOrNull() ?: return
         _uiState.value = previous
+        persistState()
     }
 
     fun addParticipant(handler: String, dog: String, utn: String) {
@@ -186,6 +235,7 @@ class ThrowNGoScreenModel : ScreenModel {
                 state.copy(queue = state.queue + participant)
             }
         }
+        persistState()
     }
 
     fun nextParticipant() {
@@ -203,6 +253,7 @@ class ThrowNGoScreenModel : ScreenModel {
                 logEntries = state.logEntries + logLine("Saved result for ${active.displayName}")
             )
         }
+        persistState()
     }
 
     fun previousParticipant() {
@@ -217,6 +268,7 @@ class ThrowNGoScreenModel : ScreenModel {
             val newQueue = combined.dropLast(1)
             state.copy(activeParticipant = newActive, queue = newQueue)
         }
+        persistState()
     }
 
     fun skipParticipant() {
@@ -228,11 +280,13 @@ class ThrowNGoScreenModel : ScreenModel {
             val remaining = if (newQueue.size <= 1) emptyList() else newQueue.drop(1)
             state.copy(activeParticipant = next, queue = remaining)
         }
+        persistState()
     }
 
     fun clearParticipants() {
         snapshotState()
         _uiState.value = ThrowNGoUiState()
+        persistState()
     }
 
     fun importParticipants(csvData: String) {
@@ -270,6 +324,7 @@ class ThrowNGoScreenModel : ScreenModel {
                 scoreState = ThrowNGoScoreState()
             )
         }
+        persistState()
     }
 
     fun exportParticipantsAsCsv(): String {
@@ -349,7 +404,8 @@ class ThrowNGoScreenModel : ScreenModel {
         logCounter = (logCounter + 1) % 1_000_000
         val counterStr = logCounter.toString().padStart(6, '0')
         val participant = _uiState.value.activeParticipant?.displayName ?: "No team"
-        return "[#%s] %s - %s".format(counterStr, participant, message)
+        // Replace String.format with string template
+        return "[#$counterStr] $participant - $message"
     }
 
     private fun seedParticipants() {

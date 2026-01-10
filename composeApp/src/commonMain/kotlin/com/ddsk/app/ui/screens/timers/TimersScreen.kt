@@ -285,7 +285,8 @@ private fun formatTime(milliseconds: Int): String {
     val totalSeconds = max(milliseconds / 1000, 0)
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
-    return "%d:%02d".format(minutes, seconds)
+    val secondsText = if (seconds < 10) "0$seconds" else seconds.toString()
+    return "$minutes:$secondsText"
 }
 
 private enum class TimerPlayerState { Stopped, Playing, Paused }

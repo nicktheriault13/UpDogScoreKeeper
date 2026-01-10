@@ -2,15 +2,21 @@ package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class GreedyScreenModel : ScreenModel {
 
+    @Serializable
     data class GreedyParticipant(
         val handler: String,
         val dog: String,
@@ -25,6 +31,12 @@ class GreedyScreenModel : ScreenModel {
         val numberOfMisses: Int = 0,
         val allRollers: Boolean = false,
         val score: Int = 0
+    )
+
+    @Serializable
+    data class GreedyPersistedState(
+        val activeParticipants: List<GreedyParticipant> = emptyList(),
+        val completedParticipants: List<GreedyParticipant> = emptyList()
     )
 
     data class GreedyStateSnapshot(
@@ -97,6 +109,39 @@ class GreedyScreenModel : ScreenModel {
 
     private val _activeParticipantIndex = MutableStateFlow(0)
     val activeParticipantIndex = _activeParticipantIndex.asStateFlow()
+
+    // Persistence
+    private var dataStore: DataStore? = null
+    private val persistenceKey = "GreedyData.json"
+
+    fun initPersistence(store: DataStore) {
+        dataStore = store
+        screenModelScope.launch {
+            val json = store.load(persistenceKey)
+            if (json != null) {
+                try {
+                    val state = Json.decodeFromString<GreedyPersistedState>(json)
+                    _participants.value = state.activeParticipants
+                    _completedParticipants.value = state.completedParticipants
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    private fun persistState() {
+        val store = dataStore ?: return
+        val state = GreedyPersistedState(_participants.value, _completedParticipants.value)
+        screenModelScope.launch {
+            try {
+                val json = Json.encodeToString(state)
+                store.save(persistenceKey, json)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     // Undo Stacks
     private val currentRoundUndoStack = ArrayDeque<GreedyStateSnapshot>()
@@ -252,6 +297,7 @@ class GreedyScreenModel : ScreenModel {
         _participants.update {
             if (it.isEmpty()) listOf(participant) else it + participant
         }
+        persistState()
     }
 
     fun nextParticipant() {
@@ -286,6 +332,7 @@ class GreedyScreenModel : ScreenModel {
             // Remove from active queue
             _participants.update { it.drop(1) }
             reset()
+            persistState()
         }
     }
 
@@ -294,6 +341,7 @@ class GreedyScreenModel : ScreenModel {
             val current = _participants.value.first()
             _participants.update { it.drop(1) + current }
             reset()
+            persistState()
         }
     }
 
@@ -305,6 +353,7 @@ class GreedyScreenModel : ScreenModel {
                 listOf(last) + it.dropLast(1)
             }
             reset()
+            persistState()
         }
     }
 
@@ -312,6 +361,7 @@ class GreedyScreenModel : ScreenModel {
         _participants.value = emptyList()
         _completedParticipants.value = emptyList()
         reset()
+        persistState()
     }
 
     fun selectParticipant(index: Int) {
@@ -323,6 +373,7 @@ class GreedyScreenModel : ScreenModel {
                 mutable
             }
             reset()
+            persistState()
         }
     }
 
@@ -346,12 +397,14 @@ class GreedyScreenModel : ScreenModel {
         val imported = parseCsv(csv)
         val newParticipants = imported.map { GreedyParticipant(it.handler, it.dog, it.utn) }
         _participants.value = _participants.value + newParticipants // Append
+        persistState()
     }
 
     fun importParticipantsFromXlsx(xlsx: ByteArray) {
         val imported = parseXlsx(xlsx)
         val newParticipants = imported.map { GreedyParticipant(it.handler, it.dog, it.utn) }
         _participants.value = _participants.value + newParticipants
+        persistState()
     }
 
     fun exportParticipantsAsXlsx(templateBytes: ByteArray): ByteArray {

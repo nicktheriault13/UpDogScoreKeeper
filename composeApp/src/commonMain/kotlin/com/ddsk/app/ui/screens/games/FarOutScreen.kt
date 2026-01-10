@@ -62,6 +62,7 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.logging.rememberGameLogger
 import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.persistence.rememberDataStore
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
@@ -74,6 +75,10 @@ object FarOutScreen : Screen {
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { FarOutScreenModel() }
+        val dataStore = rememberDataStore()
+        LaunchedEffect(Unit) {
+            screenModel.initPersistence(dataStore)
+        }
         val state by screenModel.state.collectAsState()
         val activeParticipant = state.participants.getOrNull(state.activeIndex)
         val remainingTeams = state.participants.filterNot { it.hasScoringData() }

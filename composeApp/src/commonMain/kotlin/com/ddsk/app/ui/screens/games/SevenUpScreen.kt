@@ -7,18 +7,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.koin.getScreenModel
 import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.persistence.rememberDataStore
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
-
-private fun Float.formatTwoDecimals(): String = (this * 100).toInt().toDouble().div(100).toString()
 
 object SevenUpScreen : Screen {
     @Composable
     override fun Content() {
-        val screenModel = getScreenModel<SevenUpScreenModel>()
+        val screenModel = rememberScreenModel { SevenUpScreenModel() }
+        val dataStore = rememberDataStore()
+        LaunchedEffect(Unit) {
+            screenModel.initPersistence(dataStore)
+        }
+
         val score by screenModel.score.collectAsState()
         val timeRemaining by screenModel.timeRemaining.collectAsState()
         val isTimerRunning by screenModel.isTimerRunning.collectAsState()
@@ -62,7 +66,7 @@ object SevenUpScreen : Screen {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Score: $score", style = MaterialTheme.typography.h5)
-                Text("Time: ${timeRemaining.formatTwoDecimals()}", style = MaterialTheme.typography.h5)
+                Text("Time: ${timeRemaining.toDouble().formatTwoDecimals()}", style = MaterialTheme.typography.h5)
             }
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -237,5 +241,18 @@ private fun getGridLayout(version: Int): Map<String, String> {
             "2,4" to "Jump4"
         )
         else -> emptyMap()
+    }
+}
+
+fun Double.formatTwoDecimals(): String {
+    // Multiplatform-safe formatting (avoids JVM String.format)
+    val scaled = kotlin.math.round(this * 100.0) / 100.0
+    val text = scaled.toString()
+    val dot = text.indexOf('.')
+    return when {
+        dot < 0 -> "$text.00"
+        text.length - dot - 1 == 0 -> "${text}00"
+        text.length - dot - 1 == 1 -> "${text}0"
+        else -> text
     }
 }

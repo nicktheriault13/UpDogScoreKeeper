@@ -14,7 +14,7 @@ import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.File
+
 import kotlin.math.max
 import kotlin.math.round
 
@@ -120,7 +120,6 @@ private const val MAX_UNDO_LEVELS = 250
 private val json = Json { prettyPrint = true }
 
 class FarOutScreenModel(
-    private val storage: FarOutStorage = InMemoryFarOutStorage(),
     private val logger: FarOutLogger = ConsoleFarOutLogger()
 ) : ScreenModel {
 
@@ -132,8 +131,28 @@ class FarOutScreenModel(
     private var timerJob: Job? = null
     private var timerSoundJob: Job? = null
 
-    init {
-        screenModelScope.launch { loadPersistedData() }
+    private var dataStore: com.ddsk.app.persistence.DataStore? = null
+    private val persistenceKey = "FarOutData.json"
+
+    fun initPersistence(store: com.ddsk.app.persistence.DataStore) {
+        dataStore = store
+        screenModelScope.launch {
+            val json = store.load(persistenceKey)
+            if (json != null) {
+                try {
+                    val saved = Json.decodeFromString<PersistedFarOutData>(json)
+                    _state.update { current ->
+                        current.copy(
+                            participants = saved.participants,
+                            activeIndex = saved.activeIndex,
+                            participantCountWithoutScores = saved.participants.count { !hasScoringData(it) }
+                        )
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
     }
 
     fun updateThrow(label: String, rawInput: String) {
@@ -222,7 +241,7 @@ class FarOutScreenModel(
         _state.value = FarOutState()
         undoStack.clear()
         logEvent("Participants cleared")
-        screenModelScope.launch { storage.clearParticipants() }
+        // screenModelScope.launch { storage.clearParticipants() }
     }
 
     fun nextParticipant(autoExport: Boolean = false) {
@@ -457,20 +476,34 @@ class FarOutScreenModel(
     }
 
     fun saveHelpText(text: String) {
-        storage.saveHelpText(text)
+        // storage.saveHelpText(text)
+    }
+
+    private fun persistParticipants() {
+        val store = dataStore ?: return
+        val data = PersistedFarOutData(_state.value.participants, _state.value.activeIndex)
+        screenModelScope.launch {
+            try {
+                val json = Json.encodeToString(data)
+                store.save(persistenceKey, json)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     private suspend fun loadPersistedData() {
-        val saved = storage.loadParticipants()
-        val log = storage.loadLog()
-        _state.update { current ->
-            current.copy(
-                participants = saved.participants,
-                activeIndex = saved.activeIndex,
-                logEntries = log,
-                participantCountWithoutScores = saved.participants.count { !hasScoringData(it) }
-            )
-        }
+        // Redundant with initPersistence, can be removed or kept as empty stub if interface requires it
+        // val saved = storage.loadParticipants()
+        // val log = storage.loadLog()
+        // _state.update { current ->
+        //     current.copy(
+        //         participants = saved.participants,
+        //         activeIndex = saved.activeIndex,
+        //         logEntries = log,
+        //         participantCountWithoutScores = saved.participants.count { !hasScoringData(it) }
+        //     )
+        // }
     }
 
     private fun sanitizeThrowInput(input: String): String {
@@ -502,12 +535,8 @@ class FarOutScreenModel(
         val team = participant?.let { "${it.handler} & ${it.dog}" } ?: "No team"
         val entry = FarOutLogEntry(timestamp = Clock.System.now().toString(), team = team, event = message)
         _state.update { it.copy(logEntries = listOf(entry) + it.logEntries) }
-        screenModelScope.launch { storage.saveLog(_state.value.logEntries) }
+        screenModelScope.launch { /* storage.saveLog(_state.value.logEntries) */ }
         logger.log(event = message, team = team)
-    }
-
-    private fun persistParticipants() {
-        screenModelScope.launch { storage.saveParticipants(_state.value.participants, _state.value.activeIndex) }
     }
 
     private fun hasScoringData(participant: FarOutParticipant): Boolean {
@@ -550,7 +579,7 @@ class FarOutScreenModel(
 
     private suspend fun autoExportParticipant(participant: FarOutParticipant) {
         val payload = json.encodeToString(participant)
-        storage.shareParticipantJson(participant.handler, participant.dog, payload)
+        // storage.shareParticipantJson(participant.handler, participant.dog, payload)
     }
 
     fun dispose() {
@@ -569,6 +598,7 @@ interface FarOutStorage {
     fun saveHelpText(text: String)
 }
 
+@Serializable
 data class PersistedFarOutData(
     val participants: List<FarOutParticipant> = emptyList(),
     val activeIndex: Int = 0

@@ -2,12 +2,16 @@ package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 enum class BoomScoringButton(val id: String, val label: String, val points: Int) {
     One("1", "1", 1),
@@ -36,6 +40,7 @@ enum class BoomScoringButton(val id: String, val label: String, val points: Int)
     }
 }
 
+@Serializable
 data class BoomParticipant(
     val handler: String,
     val dog: String,
@@ -43,6 +48,7 @@ data class BoomParticipant(
     val stats: BoomParticipantStats = BoomParticipantStats()
 )
 
+@Serializable
 data class BoomParticipantStats(
     val totalScore: Int = 0,
     val buttonCounts: Map<String, Int> = emptyMap(),
@@ -61,6 +67,7 @@ data class BoomParticipantStats(
     }
 }
 
+@Serializable
 data class BoomScoreBreakdown(
     val totalScore: Int = 0,
     val buttonCounts: Map<String, Int> = emptyMap(),
@@ -70,11 +77,13 @@ data class BoomScoreBreakdown(
     val lastThrowPoints: Int = 0
 )
 
+@Serializable
 data class BoomButtonState(
     val clickedButtons: Set<String> = emptySet(),
     val enabledButtons: Set<String> = setOf(BoomScoringButton.One.id)
 )
 
+@Serializable
 data class BoomUiState(
     val scoreBreakdown: BoomScoreBreakdown = BoomScoreBreakdown(),
     val buttonState: BoomButtonState = BoomButtonState(),
@@ -90,17 +99,46 @@ class BoomScreenModel : ScreenModel {
     private val _uiState = MutableStateFlow(BoomUiState())
     val uiState = _uiState.asStateFlow()
 
+    private var dataStore: DataStore? = null
+    private val persistenceKey = "BoomData.json"
+
+    fun initPersistence(store: DataStore) {
+        dataStore = store
+        screenModelScope.launch {
+            val json = store.load(persistenceKey)
+            if (json != null) {
+                try {
+                    val savedState = Json.decodeFromString<BoomUiState>(json)
+                    _uiState.value = savedState
+                } catch (e: Exception) {
+                    // Ignore decode errors
+                }
+            } else {
+                 if (_uiState.value.activeParticipant == null && _uiState.value.queue.isEmpty()) {
+                    importSampleParticipants()
+                }
+            }
+        }
+    }
+
+    private fun persistState() {
+        val store = dataStore ?: return
+        val state = _uiState.value
+        screenModelScope.launch {
+            try {
+                val json = Json.encodeToString(state)
+                store.save(persistenceKey, json)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     private var timerJob: Job? = null
     private var _timeLeft = MutableStateFlow(0)
     val timeLeft = _timeLeft.asStateFlow()
     private val _timerRunning = MutableStateFlow(false)
     val timerRunning = _timerRunning.asStateFlow()
-
-    init {
-        if (_uiState.value.activeParticipant == null && _uiState.value.queue.isEmpty()) {
-            importSampleParticipants()
-        }
-    }
 
     fun handleScoringButtonClick(button: BoomScoringButton) {
         _uiState.update { state ->
@@ -119,6 +157,7 @@ class BoomScreenModel : ScreenModel {
                 )
             )
         }
+        persistState()
     }
 
     fun handleBoom() {
@@ -142,6 +181,7 @@ class BoomScreenModel : ScreenModel {
                 sweetSpotActive = false
             )
         }
+        persistState()
     }
 
     fun handleDud() {
@@ -165,10 +205,12 @@ class BoomScreenModel : ScreenModel {
                 sweetSpotActive = false
             )
         }
+        persistState()
     }
 
     fun toggleSweetSpot() {
         _uiState.update { it.copy(sweetSpotActive = !it.sweetSpotActive) }
+        persistState()
     }
 
     fun resetGame() {
@@ -179,6 +221,7 @@ class BoomScreenModel : ScreenModel {
                 sweetSpotActive = false
             )
         }
+        persistState()
     }
 
     fun nextParticipant() {
@@ -196,6 +239,7 @@ class BoomScreenModel : ScreenModel {
                 sweetSpotActive = false
             )
         }
+        persistState()
     }
 
     fun skipParticipant() {
@@ -209,7 +253,7 @@ class BoomScreenModel : ScreenModel {
                 queue = if (queue.isEmpty()) listOf(active) else remainingQueue
             )
         }
-        resetGame()
+        resetGame() // persistState calls inside resetGame
     }
 
     fun importParticipantsFromCsv(csvText: String) {
@@ -233,7 +277,7 @@ class BoomScreenModel : ScreenModel {
                 completedParticipants = emptyList()
             )
         }
-        resetGame()
+        resetGame() // persistState calls inside resetGame
     }
 
     fun exportParticipantsAsCsv(): String {
@@ -286,6 +330,7 @@ class BoomScreenModel : ScreenModel {
 
     fun toggleFieldOrientation() {
         _uiState.update { it.copy(isFieldFlipped = !it.isFieldFlipped) }
+        persistState()
     }
 
     private fun importSampleParticipants() {

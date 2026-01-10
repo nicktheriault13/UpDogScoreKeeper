@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -51,29 +50,39 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.persistence.rememberDataStore
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.StateFlow
 
 object SpacedOutScreen : Screen {
-
     @Composable
     override fun Content() {
-        val screenModel = rememberScreenModel { SpacedOutScreenModel() }
-        val score by screenModel.score.collectAsState()
-        val spacedOutCount by screenModel.spacedOutCount.collectAsState()
-        val misses by screenModel.misses.collectAsState()
-        val ob by screenModel.ob.collectAsState()
-        val zonesCaught by screenModel.zonesCaught.collectAsState()
-        val clickedZones by screenModel.clickedZonesInRound.collectAsState()
-        val sweetSpotBonusOn by screenModel.sweetSpotBonusOn.collectAsState()
-        val fieldFlipped by screenModel.fieldFlipped.collectAsState()
-        val activeParticipant by screenModel.activeParticipant.collectAsState()
-        val queue by screenModel.participantQueue.collectAsState()
-        val logEntries by screenModel.logEntries.collectAsState()
-        val timeLeft by screenModel.timeLeft.collectAsState()
-        val timerRunning by screenModel.timerRunning.collectAsState()
+        val navigator = LocalNavigator.currentOrThrow
+        // Renaming to test cache and fixing potential syntax issues
+        val myModel = remember { SpacedOutScreenModel() }
+        val dataStore = com.ddsk.app.persistence.rememberDataStore()
+        LaunchedEffect(Unit) {
+            myModel.initPersistence(dataStore)
+        }
+        val scoreState = myModel.score
+        val score by scoreState.collectAsState()
+        val spacedOutCount by myModel.spacedOutCount.collectAsState()
+        val misses by myModel.misses.collectAsState()
+        val ob by myModel.ob.collectAsState()
+        val zonesCaught by myModel.zonesCaught.collectAsState()
+        val clickedZones by myModel.clickedZonesInRound.collectAsState()
+        val sweetSpotBonusOn by myModel.sweetSpotBonusOn.collectAsState()
+        val fieldFlipped by myModel.fieldFlipped.collectAsState()
+        val activeParticipant by myModel.activeParticipant.collectAsState()
+        val queue by myModel.participantQueue.collectAsState()
+        val logEntries by myModel.logEntries.collectAsState()
+        val timeLeft by myModel.timeLeft.collectAsState()
+        val timerRunning by myModel.timerRunning.collectAsState()
 
         val sidebarCollapsed = rememberSaveable { mutableStateOf(false) }
         val scrollState = rememberScrollState()
@@ -90,8 +99,8 @@ object SpacedOutScreen : Screen {
         val filePicker = rememberFilePicker { result ->
             scope.launch {
                 when (result) {
-                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
-                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
+                    is ImportResult.Csv -> myModel.importParticipantsFromCsv(result.contents)
+                    is ImportResult.Xlsx -> myModel.importParticipantsFromXlsx(result.bytes)
                     else -> {}
                 }
             }
@@ -110,15 +119,15 @@ object SpacedOutScreen : Screen {
         Surface(color = MaterialTheme.colors.background) {
             Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 HeaderRow(
-                    activeName = activeParticipant?.displayName ?: "No team loaded",
+                    activeName = activeParticipant?.displayName() ?: "No team loaded",
                     score = score,
                     timeLeft = timeLeft,
                     timerRunning = timerRunning,
                     onTimerToggle = {
-                        if (timerRunning) screenModel.stopTimer() else screenModel.startTimer()
+                        if (timerRunning) myModel.stopTimer() else myModel.startTimer()
                     },
-                    onTimerReset = screenModel::resetTimer,
-                    onResetRound = screenModel::reset
+                    onTimerReset = myModel::resetTimer,
+                    onResetRound = myModel::reset
                 )
 
                 Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -130,19 +139,19 @@ object SpacedOutScreen : Screen {
                         ob = ob,
                         sweetSpotBonusOn = sweetSpotBonusOn,
                         onToggleCollapse = { sidebarCollapsed.value = !sidebarCollapsed.value },
-                        onMiss = screenModel::incrementMisses,
-                        onOb = screenModel::incrementOb,
-                        onSweetSpotToggle = screenModel::toggleSweetSpotBonus,
-                        onFlipField = screenModel::flipField,
-                        onReset = screenModel::reset,
+                        onMiss = myModel::incrementMisses,
+                        onOb = myModel::incrementOb,
+                        onSweetSpotToggle = myModel::toggleSweetSpotBonus,
+                        onFlipField = myModel::flipField,
+                        onReset = myModel::reset,
                         onAddTeam = { showAddParticipant = true },
                         onImport = { filePicker.launch() },
-                        onExport = { exportBuffer = screenModel.exportParticipantsAsCsv() },
-                        onExportLog = { logBuffer = screenModel.exportLog() },
-                        onNext = screenModel::nextParticipant,
-                        onPrev = screenModel::previousParticipant,
-                        onSkip = screenModel::skipParticipant,
-                        onClearParticipants = screenModel::clearParticipants
+                        onExport = { exportBuffer = myModel.exportParticipantsAsCsv() },
+                        onExportLog = { logBuffer = myModel.exportLog() },
+                        onNext = myModel::nextParticipant,
+                        onPrev = myModel::previousParticipant,
+                        onSkip = myModel::skipParticipant,
+                        onClearParticipants = myModel::clearParticipants
                     )
 
                     ParticipantList(queue = queue)
@@ -156,9 +165,9 @@ object SpacedOutScreen : Screen {
                     ) {
                         TopStats(score, spacedOutCount, zonesCaught, misses, ob)
                         Spacer(modifier = Modifier.height(16.dp))
-                        ScoringGrid(fieldFlipped, clickedZones, screenModel)
+                        ScoringGrid(fieldFlipped, clickedZones, myModel)
                         Spacer(modifier = Modifier.height(16.dp))
-                        SweetSpotBonusButton(sweetSpotBonusOn, screenModel::toggleSweetSpotBonus)
+                        SweetSpotBonusButton(sweetSpotBonusOn, myModel::toggleSweetSpotBonus)
                     }
                 }
 
@@ -180,7 +189,7 @@ object SpacedOutScreen : Screen {
                 onUtnChange = { utnInput = it },
                 onDismiss = { showAddParticipant = false },
                 onConfirm = {
-                    screenModel.addParticipant(handlerInput, dogInput, utnInput)
+                    myModel.addParticipant(handlerInput, dogInput, utnInput)
                     handlerInput = ""
                     dogInput = ""
                     utnInput = ""
@@ -381,7 +390,7 @@ private fun ParticipantList(queue: List<SpacedOutParticipant>, modifier: Modifie
             LazyColumn(modifier = Modifier.weight(1f)) {
                 items(queue) { participant ->
                     Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                        Text(participant.displayName, fontWeight = FontWeight.SemiBold)
+                        Text(participant.displayName(), fontWeight = FontWeight.SemiBold)
                         if (participant.utn.isNotBlank()) {
                             Text(participant.utn, fontSize = 12.sp, color = Color.Gray)
                         }

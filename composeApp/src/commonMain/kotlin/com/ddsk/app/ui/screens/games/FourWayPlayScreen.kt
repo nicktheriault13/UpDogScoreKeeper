@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,18 +19,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Card
-import androidx.compose.material.Divider
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
+import androidx.compose.material.Surface
 import androidx.compose.material.Text
-import androidx.compose.material.TextButton
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -49,34 +49,62 @@ import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.persistence.rememberDataStore
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+
+private val successGreen = Color(0xFF00C853)
+private val warningOrange = Color(0xFFFF9100)
+private val boomPink = Color(0xFFF500A1) // Keeping BoomPink for consistency or distinct actions
+// Palette from original file
+private object FourWayPalette {
+    val primary = Color(0xFF6750A4)
+    val onPrimary = Color.White
+    val success = Color(0xFF00C853)
+    val onSuccess = Color.White
+    val warning = Color(0xFFFFB74D) // Lighter orange
+    val info = Color(0xFF2979FF)
+    val onInfo = Color.White
+    val error = Color(0xFFD50000)
+    val surfaceContainer = Color(0xFFF5EFF7)
+    val onSurface = Color(0xFF1C1B1F)
+    val onSurfaceVariant = Color(0xFF49454F)
+    val outlineVariant = Color(0xFFCAC4D0)
+}
 
 object FourWayPlayScreen : Screen {
     @Composable
     override fun Content() {
         val screenModel = rememberScreenModel { FourWayPlayScreenModel() }
+        val dataStore = rememberDataStore()
+        LaunchedEffect(Unit) {
+            screenModel.initPersistence(dataStore)
+        }
         val score by screenModel.score.collectAsState()
         val quads by screenModel.quads.collectAsState()
         val misses by screenModel.misses.collectAsState()
 
         var timerRunning by remember { mutableStateOf(false) }
-        var secondsRemaining by remember { mutableStateOf(60) }
+        var secondsRemaining by remember { mutableStateOf(60) } // Simple local timer for now to match prev implementation, or could be moved to model
 
         val participants by screenModel.participants.collectAsState()
-        val sidebarCollapsed by screenModel.sidebarCollapsed.collectAsState()
         val fieldFlipped by screenModel.fieldFlipped.collectAsState()
         val clickedZones by screenModel.clickedZones.collectAsState()
         val sweetSpot by screenModel.sweetSpotClicked.collectAsState()
         val allRollers by screenModel.allRollers.collectAsState()
-        val sidebarMessage by screenModel.lastSidebarAction.collectAsState()
+        val completed by screenModel.completed.collectAsState()
+
+        val assetLoader = rememberAssetLoader()
+        val fileExporter = rememberFileExporter()
+        val scope = rememberCoroutineScope()
 
         var showAddParticipant by remember { mutableStateOf(false) }
         var handlerInput by remember { mutableStateOf("") }
         var dogInput by remember { mutableStateOf("") }
         var utnInput by remember { mutableStateOf("") }
-
-        val scope = rememberCoroutineScope()
+        var showExportDialog by remember { mutableStateOf(false) }
+        var exportMessage by remember { mutableStateOf("") }
 
         val filePicker = rememberFilePicker { result ->
             scope.launch {
@@ -91,63 +119,137 @@ object FourWayPlayScreen : Screen {
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("4-Way Play") })
 
         LaunchedEffect(timerRunning) {
-            if (!timerRunning) {
-                audioPlayer.stop()
-            } else {
+            if (timerRunning) {
                 audioPlayer.play()
+            } else {
+                audioPlayer.stop()
             }
         }
 
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val spacing = 12.dp
-            val sidebarWidth = if (sidebarCollapsed) 68.dp else 190.dp
-            val participantWidth = 220.dp
-            val minFieldWidth = 200.dp
-            val availableFieldWidth = (maxWidth - sidebarWidth - participantWidth - (spacing * 2)).coerceAtLeast(minFieldWidth)
-            val fieldHeight = (availableFieldWidth / 1.2f).coerceAtLeast(320.dp)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(spacing),
-                verticalAlignment = Alignment.Top
-            ) {
-                SidebarColumn(
-                    collapsed = sidebarCollapsed,
-                    onToggle = screenModel::toggleSidebar,
-                    onImport = { filePicker.launch() },
-                    onExport = { screenModel.recordSidebarAction("Export tapped") },
-                    onLog = { screenModel.recordSidebarAction("Log tapped") },
-                    onAddTeam = { showAddParticipant = true },
-                    onHelp = { screenModel.recordSidebarAction("Help opened") },
-                    onReset = screenModel::resetScoring,
-                    onFlipField = screenModel::flipField,
-                    onPrevious = screenModel::moveToPreviousParticipant,
-                    onNext = screenModel::moveToNextParticipant,
-                    onSkip = screenModel::skipParticipant,
-                    onAllRollers = screenModel::toggleAllRollers,
-                    onUndo = screenModel::undo,
-                    allRollersEnabled = allRollers,
-                    sidebarMessage = sidebarMessage,
-                )
-
-                ParticipantPanel(
-                    participants = participants,
-                    height = fieldHeight,
-                    onSelect = { screenModel.recordSidebarAction("Viewing ${it.handler}") },
-                )
-
-                FieldGrid(
-                    fieldFlipped = fieldFlipped,
-                    clickedZones = clickedZones,
-                    sweetSpot = sweetSpot,
-                    allRollers = allRollers,
-                    onZoneClick = screenModel::handleZoneClick,
-                    onSweetSpotClick = screenModel::handleSweetSpotClick,
+        Surface(modifier = Modifier.fillMaxSize()) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val columnSpacing = 16.dp
+                Row(
                     modifier = Modifier
-                        .width(availableFieldWidth)
-                        .height(fieldHeight)
-                )
+                        .fillMaxSize()
+                        .padding(columnSpacing),
+                    horizontalArrangement = Arrangement.spacedBy(columnSpacing)
+                ) {
+                    // Left Column (Game Area)
+                    Column(
+                        modifier = Modifier
+                            .weight(2f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                    ) {
+                        ScoreSummaryCard(
+                            score = score,
+                            quads = quads,
+                            misses = misses,
+                            activeParticipant = participants.firstOrNull()
+                        )
+                        Box(modifier = Modifier.weight(1f)) {
+                            // Using a placeholder or actual grid component if available
+                            // Ensure FourWayPlayGrid or similar is defined
+                            // MainGrid(
+                            // ...
+                            // )
+                            // Replacing with FourWayGrid which should be defined below
+                            FourWayGrid(
+                                clickedZones = clickedZones,
+                                fieldFlipped = fieldFlipped,
+                                sweetSpot = sweetSpot,
+                                allRollers = allRollers,
+                                onZoneClick = { screenModel.handleZoneClick(it) },
+                                onSweetSpotClick = screenModel::toggleSweetSpot
+                            )
+                        }
+                        ControlRow(
+                            screenModel = screenModel,
+                            onAddMiss = screenModel::addMiss
+                        )
+                    }
+
+                    // Right Column (Info & Actions)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                    ) {
+                         TimerCard(
+                             timerRunning = timerRunning,
+                             modifier = Modifier.fillMaxWidth(),
+                             onStartStop = { timerRunning = !timerRunning },
+                             onReset = {
+                                 timerRunning = false
+                                 // Reset timer logic if it involved actual time tracking
+                             }
+                         )
+
+                         ParticipantQueueCard(
+                             participants = participants,
+                             completedCount = completed.size,
+                             onAddTeam = { showAddParticipant = true }
+                         )
+
+                         ImportExportCard(
+                            onImportClick = { filePicker.launch() },
+                            onExportClick = {
+                                scope.launch {
+                                    val scored = screenModel.getParticipantsForExport()
+                                    if (scored.isEmpty()) {
+                                        exportMessage = "No scored teams to export"
+                                        showExportDialog = true
+                                        return@launch
+                                    }
+                                    val template = assetLoader.load("templates/UDC FourWayPlay Data Entry L1 or L2 Div Sort 6-2023.xlsm")
+                                    if (template == null) {
+                                        exportMessage = "Template missing"
+                                        showExportDialog = true
+                                        return@launch
+                                    }
+                                    val exportRows = scored.map {
+                                        FourWayPlayExportParticipant(
+                                            handler = it.handler,
+                                            dog = it.dog,
+                                            utn = it.utn,
+                                            zone1Catches = it.zone1Catches,
+                                            zone2Catches = it.zone2Catches,
+                                            zone3Catches = it.zone3Catches,
+                                            zone4Catches = it.zone4Catches,
+                                            sweetSpot = if (it.sweetSpot) 1 else 0,
+                                            allRollers = if (it.allRollers) 1 else 0,
+                                            heightDivision = it.heightDivision,
+                                            misses = it.misses
+                                        )
+                                    }
+                                    val bytes = generateFourWayPlayXlsx(exportRows, template)
+                                    if (bytes.isEmpty()) {
+                                        exportMessage = "Export failed"
+                                    } else {
+                                        // Use a multiplatform-safe timestamp (doesn't rely on java.lang.System)
+                                        val timestamp = kotlin.time.TimeSource.Monotonic.markNow().elapsedNow().inWholeMilliseconds
+                                        val fileName = "FourWayPlay_${timestamp}.xlsm"
+                                        fileExporter.save(fileName, bytes)
+                                        exportMessage = "Exported ${exportRows.size} teams"
+                                    }
+                                    showExportDialog = true
+                                }
+                            }
+                         )
+                    }
+                }
             }
+        }
+
+        if (showExportDialog) {
+            AlertDialog(
+                onDismissRequest = { showExportDialog = false },
+                title = { Text("Export") },
+                text = { Text(exportMessage) },
+                confirmButton = { Button(onClick = { showExportDialog = false }) { Text("OK") } }
+            )
         }
 
         if (showAddParticipant) {
@@ -183,190 +285,33 @@ object FourWayPlayScreen : Screen {
 }
 
 @Composable
-private fun HeaderRow(
-    timerRunning: Boolean,
-    secondsRemaining: Int,
-    onTimerToggle: () -> Unit,
-    participants: List<FourWayPlayScreenModel.Participant>,
+private fun ScoreSummaryCard(
     score: Int,
     quads: Int,
     misses: Int,
-    onMiss: () -> Unit,
+    activeParticipant: FourWayPlayScreenModel.Participant?
 ) {
-    Card(elevation = 6.dp, backgroundColor = Palette.surface, shape = RoundedCornerShape(14.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                onClick = onTimerToggle,
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = if (timerRunning) Palette.warning else Palette.info,
-                    contentColor = Color.White
-                ),
-                modifier = Modifier.height(48.dp)
-            ) {
-                Text(if (timerRunning) "$secondsRemaining s" else "Timer", fontWeight = FontWeight.Bold)
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = participants.firstOrNull()?.let { "${it.handler} & ${it.dog}" } ?: "No team loaded",
-                    style = MaterialTheme.typography.h6,
-                    color = Palette.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "Score $score  •  Quads $quads  •  Misses $misses",
-                    style = MaterialTheme.typography.body2,
-                    color = Palette.onSurfaceVariant
-                )
-            }
-
-            Button(
-                onClick = onMiss,
-                colors = ButtonDefaults.buttonColors(backgroundColor = Palette.error, contentColor = Color.White),
-                modifier = Modifier.height(48.dp)
-            ) {
-                Text("Miss", fontWeight = FontWeight.Bold)
-            }
+    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(text = "Score: $score", style = MaterialTheme.typography.h4)
+            Spacer(modifier = Modifier.heightIn(min = 4.dp))
+            Text(
+                text = "Quads: $quads • Misses: $misses",
+                style = MaterialTheme.typography.body2
+            )
+            Spacer(modifier = Modifier.heightIn(min = 8.dp))
+            val active = activeParticipant
+            Text(
+                text = active?.let { "Active: ${it.handler} & ${it.dog} (${it.utn})" } ?: "No active team",
+                style = MaterialTheme.typography.subtitle1,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
 
 @Composable
-private fun SidebarColumn(
-    collapsed: Boolean,
-    onToggle: () -> Unit,
-    onImport: () -> Unit,
-    onExport: () -> Unit,
-    onLog: () -> Unit,
-    onAddTeam: () -> Unit,
-    onHelp: () -> Unit,
-    onReset: () -> Unit,
-    onFlipField: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onSkip: () -> Unit,
-    onAllRollers: () -> Unit,
-    onUndo: () -> Unit,
-    allRollersEnabled: Boolean,
-    sidebarMessage: String,
-) {
-    val sidebarWidth: Dp = if (collapsed) 68.dp else 190.dp
-    Column(
-        modifier = Modifier
-            .width(sidebarWidth)
-            .background(Palette.surfaceContainer, RoundedCornerShape(14.dp))
-            .border(1.dp, Palette.outlineVariant, RoundedCornerShape(14.dp))
-            .padding(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Button(
-            onClick = onToggle,
-            colors = ButtonDefaults.buttonColors(backgroundColor = Palette.primary, contentColor = Palette.onPrimary),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (collapsed) "☰" else "Hide")
-        }
-
-        if (!collapsed) {
-            Spacer(Modifier.height(12.dp))
-            val scrollState = rememberScrollState()
-            Column(modifier = Modifier.verticalScroll(scrollState)) {
-                SidebarButton("Import", Palette.info, onImport)
-                SidebarButton("Export", Palette.info, onExport)
-                SidebarButton("Log", Palette.info, onLog)
-                SidebarButton("Add Team", Palette.success, onAddTeam)
-                SidebarButton("Help", Palette.primaryContainer, onHelp, Palette.onPrimaryContainer)
-                SidebarButton("Reset", Palette.warning, onReset)
-                SidebarButton("Flip Field", Palette.primary, onFlipField)
-                SidebarButton("Previous", Palette.tertiary, onPrevious)
-                SidebarButton(
-                    text = if (allRollersEnabled) "All Rollers✓" else "All Rollers",
-                    background = if (allRollersEnabled) Palette.success else Palette.primary,
-                    onClick = onAllRollers
-                )
-                SidebarButton("Undo", Palette.error, onUndo)
-                SidebarButton("Next", Palette.tertiary, onNext)
-                SidebarButton("Skip", Palette.tertiary, onSkip)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = sidebarMessage,
-                    style = MaterialTheme.typography.caption,
-                    color = Palette.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SidebarButton(
-    text: String,
-    background: Color,
-    onClick: () -> Unit,
-    textColor: Color = Color.White,
-) {
-    Button(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        colors = ButtonDefaults.buttonColors(backgroundColor = background, contentColor = textColor)
-    ) {
-        Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun ParticipantPanel(
-    participants: List<FourWayPlayScreenModel.Participant>,
-    height: Dp,
-    onSelect: (FourWayPlayScreenModel.Participant) -> Unit,
-) {
-    Card(
-        backgroundColor = Palette.surfaceContainer,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .width(220.dp)
-            .heightIn(min = height)
-            .fillMaxHeight(),
-        elevation = 4.dp
-    ) {
-        Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-            Text("Remaining (${participants.size})", fontWeight = FontWeight.Bold, color = Palette.onSurface)
-            Spacer(Modifier.height(8.dp))
-            Divider(color = Palette.outlineVariant)
-            Spacer(Modifier.height(8.dp))
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(participants) { participant ->
-                    ParticipantRow(participant = participant, onSelect = { onSelect(participant) })
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ParticipantRow(participant: FourWayPlayScreenModel.Participant, onSelect: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(Palette.surface)
-            .padding(10.dp)
-            .then(Modifier)
-    ) {
-        Text(participant.handler, fontWeight = FontWeight.Bold, color = Palette.onSurface)
-        Text(participant.dog, color = Palette.onSurfaceVariant, fontSize = 12.sp)
-        Text(participant.utn, color = Palette.onSurfaceVariant, fontSize = 12.sp)
-    }
-}
-
-@Composable
-private fun FieldGrid(
+private fun FourWayGrid(
     fieldFlipped: Boolean,
     clickedZones: Set<Int>,
     sweetSpot: Boolean,
@@ -375,93 +320,75 @@ private fun FieldGrid(
     onSweetSpotClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier = modifier) {
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            backgroundColor = Palette.surfaceContainer,
-            elevation = 8.dp,
-            modifier = Modifier.fillMaxSize()
-        ) {
-            BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                val horizontalSpacing = 8.dp
-                val verticalSpacing = 8.dp
-                val availableHeight = (maxHeight - verticalSpacing * 2).coerceAtLeast(0.dp)
-                val unitHeight = (availableHeight / 3.5f)
-                val compactRowHeight = unitHeight.coerceAtLeast(72.dp)
-                val middleRowHeight = (unitHeight * 1.5f).coerceAtLeast(96.dp)
-                val availableWidth = (maxWidth - horizontalSpacing * 2).coerceAtLeast(0.dp)
-                val cellWidth = (availableWidth / 3f).coerceAtLeast(72.dp)
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        elevation = 8.dp
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val horizontalPadding = 16.dp
+            val interCellSpacing = 12.dp
+            // Calculations similar to BoomGrid for consistency
+            val gridWidth = (maxWidth - horizontalPadding * 2).coerceAtLeast(0.dp)
+            val widthLimitedCell = ((gridWidth - interCellSpacing * 2) / 3).coerceAtLeast(60.dp) // 3 columns
 
-                val rowOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
-                val colOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
+            val hasFiniteHeight = maxHeight != Dp.Unspecified && maxHeight != Dp.Infinity && maxHeight > 0.dp
+            val heightLimitedCell = if (hasFiniteHeight) {
+                val totalSpacing = interCellSpacing * 2
+                (((maxHeight - totalSpacing) / 3).coerceAtLeast(60.dp)) // 3 rows mostly
+            } else {
+                widthLimitedCell
+            }
+            val cellSize = minOf(widthLimitedCell, heightLimitedCell)
 
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(verticalSpacing)
-                ) {
-                    rowOrder.forEach { row ->
-                        val rowHeight = if (row == 1) middleRowHeight else compactRowHeight
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(rowHeight),
-                            horizontalArrangement = Arrangement.spacedBy(horizontalSpacing)
-                        ) {
-                            colOrder.forEach { col ->
-                                Box(
-                                    modifier = Modifier
-                                        .width(cellWidth)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Palette.surface)
-                                        .border(1.dp, Palette.outlineVariant, RoundedCornerShape(12.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    when {
-                                        row == 0 && col == 0 -> ZoneButton(
-                                            value = 1,
-                                            clicked = 1 in clickedZones,
-                                            onClick = { onZoneClick(1) }
-                                        )
-                                        row == 0 && col == 2 -> ZoneButton(
-                                            value = 2,
-                                            clicked = 2 in clickedZones,
-                                            onClick = { onZoneClick(2) }
-                                        )
-                                        row == 2 && col == 2 -> ZoneButton(
-                                            value = 3,
-                                            clicked = 3 in clickedZones,
-                                            onClick = { onZoneClick(3) }
-                                        )
-                                        row == 2 && col == 0 -> ZoneButton(
-                                            value = 4,
-                                            clicked = 4 in clickedZones,
-                                            onClick = { onZoneClick(4) }
-                                        )
-                                        row == 1 && col == 1 -> SweetSpotButton(
-                                            active = sweetSpot,
-                                            onClick = onSweetSpotClick
-                                        )
-                                    }
+            val rowOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
+            val colOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = horizontalPadding, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(interCellSpacing, Alignment.CenterVertically),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                rowOrder.forEach { row ->
+                    val rowHeight = if (row == 1) cellSize * 1.2f else cellSize
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(rowHeight),
+                        horizontalArrangement = Arrangement.spacedBy(interCellSpacing, Alignment.CenterHorizontally)
+                    ) {
+                        colOrder.forEach { col ->
+                            Box(
+                                modifier = Modifier
+                                    .width(cellSize)
+                                    .fillMaxHeight(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                when {
+                                    row == 0 && col == 0 -> ZoneButton(1, 1 in clickedZones) { onZoneClick(1) }
+                                    row == 0 && col == 2 -> ZoneButton(2, 2 in clickedZones) { onZoneClick(2) }
+                                    row == 2 && col == 2 -> ZoneButton(3, 3 in clickedZones) { onZoneClick(3) }
+                                    row == 2 && col == 0 -> ZoneButton(4, 4 in clickedZones) { onZoneClick(4) }
+                                    row == 1 && col == 1 -> SweetSpotButton(sweetSpot, onSweetSpotClick)
                                 }
                             }
                         }
                     }
                 }
             }
-        }
 
-        if (allRollers) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(12.dp),
-                contentAlignment = Alignment.TopEnd
-            ) {
-                Text(
-                    text = "All Rollers Active",
-                    color = Palette.success,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                )
+            if (allRollers) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {
+                     Text(
+                        text = "All Rollers Active",
+                        color = FourWayPalette.success,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        modifier = Modifier.background(FourWayPalette.surfaceContainer, RoundedCornerShape(4.dp)).padding(4.dp)
+                    )
+                }
             }
         }
     }
@@ -470,15 +397,15 @@ private fun FieldGrid(
 @Composable
 private fun ZoneButton(value: Int, clicked: Boolean, onClick: () -> Unit) {
     val colors = if (clicked) {
-        ButtonDefaults.buttonColors(backgroundColor = Palette.success, contentColor = Palette.onSuccess)
+        ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.success, contentColor = FourWayPalette.onSuccess)
     } else {
-        ButtonDefaults.buttonColors(backgroundColor = Palette.primary, contentColor = Palette.onPrimary)
+        ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.primary, contentColor = FourWayPalette.onPrimary)
     }
     Button(
         onClick = onClick,
         enabled = !clicked,
         colors = colors,
-        modifier = Modifier.fillMaxSize().padding(6.dp),
+        modifier = Modifier.fillMaxSize(),
         shape = RoundedCornerShape(12.dp)
     ) {
         Text(value.toString(), fontSize = 32.sp, fontWeight = FontWeight.Black)
@@ -490,32 +417,105 @@ private fun SweetSpotButton(active: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(
-            backgroundColor = if (active) Palette.success else Palette.info,
-            contentColor = if (active) Palette.onSuccess else Palette.onInfo
+            backgroundColor = if (active) FourWayPalette.success else FourWayPalette.info,
+            contentColor = if (active) FourWayPalette.onSuccess else FourWayPalette.onInfo
         ),
-        modifier = Modifier.fillMaxSize().padding(6.dp),
+        modifier = Modifier.fillMaxSize(),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Text("Sweet Spot", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Text(if (active) "Sweet Spot\nON" else "Sweet Spot", fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
 }
 
-private object Palette {
-    val primary = Color(0xFF6750A4)
-    val onPrimary = Color.White
-    val primaryContainer = Color(0xFFEADDFF)
-    val onPrimaryContainer = Color(0xFF21005D)
-    val success = Color(0xFF00C853)
-    val onSuccess = Color.White
-    val warning = Color(0xFFFFB74D)
-    val info = Color(0xFF2979FF)
-    val onInfo = Color.White
-    val error = Color(0xFFD50000)
-    val background = Color(0xFFFEFBFF)
-    val surface = Color(0xFFFEF7FF)
-    val surfaceContainer = Color(0xFFF5EFF7)
-    val onSurface = Color(0xFF1C1B1F)
-    val onSurfaceVariant = Color(0xFF49454F)
-    val outlineVariant = Color(0xFFCAC4D0)
-    val tertiary = Color(0xFFF500A1)
+@Composable
+private fun ControlRow(screenModel: FourWayPlayScreenModel, onAddMiss: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        ControlActionButton("Miss", FourWayPalette.error, onAddMiss)
+        ControlActionButton("Undo", FourWayPalette.warning, { screenModel.undo() })
+        ControlActionButton("Next Team", FourWayPalette.primary, { screenModel.moveToNextParticipant() })
+        ControlActionButton("Flip Field", FourWayPalette.info, { screenModel.flipField() }, FourWayPalette.onInfo)
+        ControlActionButton("Reset Round", FourWayPalette.error, { screenModel.resetScoring() }) // Moved to end, dangerous action
+    }
 }
+
+@Composable
+private fun RowScope.ControlActionButton(
+    text: String,
+    color: Color,
+    onClick: () -> Unit,
+    contentColor: Color = Color.White
+) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.weight(1f).height(56.dp),
+        colors = ButtonDefaults.buttonColors(backgroundColor = color, contentColor = contentColor)
+    ) {
+        Text(text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun TimerCard(timerRunning: Boolean, modifier: Modifier = Modifier, onStartStop: () -> Unit, onReset: () -> Unit) {
+    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = modifier) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(text = "Timer", style = MaterialTheme.typography.h6)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onStartStop,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = if (timerRunning) FourWayPalette.warning else FourWayPalette.success,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text(if (timerRunning) "Stop" else "Start 60s")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ParticipantQueueCard(participants: List<FourWayPlayScreenModel.Participant>, completedCount: Int, onAddTeam: () -> Unit) {
+    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(text = "Teams", style = MaterialTheme.typography.h6)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = "Remaining: ${participants.size}", style = MaterialTheme.typography.caption)
+            Text(text = "Completed: $completedCount", style = MaterialTheme.typography.caption)
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onAddTeam, modifier = Modifier.fillMaxWidth()) {
+                Text("Add Team")
+            }
+            Spacer(modifier = Modifier.heightIn(min = 8.dp))
+            LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                items(participants) { participant ->
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        Text(text = "${participant.handler} & ${participant.dog}", fontWeight = FontWeight.Bold)
+                        Text(text = participant.utn, style = MaterialTheme.typography.caption)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportExportCard(onImportClick: () -> Unit, onExportClick: () -> Unit) {
+    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(text = "Data", style = MaterialTheme.typography.h6)
+            Button(onClick = onImportClick, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.info, contentColor = Color.White)) {
+                Text("Import")
+            }
+            Button(onClick = onExportClick, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.info, contentColor = Color.White)) {
+                Text("Export Excel")
+            }
+        }
+    }
+}
+
+// NOTE: FourWayPlayExportParticipant and generateFourWayPlayXlsx are declared in FileUtils.kt (expect/actual).
