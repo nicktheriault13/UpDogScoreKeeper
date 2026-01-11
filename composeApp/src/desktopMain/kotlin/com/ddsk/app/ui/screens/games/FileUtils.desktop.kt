@@ -169,7 +169,7 @@ actual fun rememberAssetLoader(): AssetLoader {
     }
 }
 
-actual fun generateGreedyXlsx(participants: List<GreedyScreenModel.GreedyParticipant>, templateBytes: ByteArray): ByteArray {
+actual fun generateGreedyXlsx(participants: List<GreedyParticipant>, templateBytes: ByteArray): ByteArray {
     try {
         val inputStream = ByteArrayInputStream(templateBytes)
         val workbook = WorkbookFactory.create(inputStream)
@@ -309,6 +309,51 @@ actual fun generateFireballXlsx(participants: List<FireballParticipant>, templat
             row.createCell(7).setCellValue((p.highestZone ?: 0).toDouble())
             row.createCell(9).setCellValue(if (p.allRollers) "Y" else "N")
             row.createCell(10).setCellValue(p.heightDivision)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
+actual fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 4 // Excel row 5
+
+        val sorted = participants.sortedWith(
+            compareByDescending<TimeWarpParticipant> { it.result?.score ?: 0 }
+                .thenByDescending { it.result?.timeRemaining?.roundToInt() ?: 0 }
+        )
+
+        var outIndex = 0
+        sorted.forEach { p ->
+            val r = p.result ?: return@forEach
+            val hasAnyData = r.score != 0 || r.misses != 0 || r.zonesCaught != 0 || r.sweetSpot || r.allRollers || r.timeRemaining != 60.0f
+            if (!hasAnyData) return@forEach
+
+            val rowNum = startRow + outIndex
+            outIndex++
+
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+            row.createCell(0).setCellValue(1.0)
+            row.createCell(1).setCellValue(p.handler)
+            row.createCell(2).setCellValue(p.dog)
+            row.createCell(3).setCellValue(p.utn)
+
+            row.createCell(4).setCellValue(r.timeRemaining.toDouble())
+            row.createCell(5).setCellValue(r.timeRemaining.roundToInt().toDouble())
+            row.createCell(6).setCellValue(r.misses.toDouble())
+            row.createCell(7).setCellValue(r.zonesCaught.toDouble())
+            row.createCell(8).setCellValue(if (r.sweetSpot) "Y" else "N")
+            row.createCell(11).setCellValue(if (r.allRollers) "Y" else "N")
         }
 
         ByteArrayOutputStream().use { bos ->

@@ -17,32 +17,10 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.math.max
 import kotlin.math.roundToInt
-
-@Serializable
-data class TimeWarpRoundResult(
-    val score: Int,
-    val timeRemaining: Float,
-    val misses: Int,
-    val zonesCaught: Int,
-    val sweetSpot: Boolean,
-    val allRollers: Boolean
-)
-
-@Serializable
-data class TimeWarpParticipant(
-    val handler: String,
-    val dog: String,
-    val utn: String,
-    val result: TimeWarpRoundResult? = null
-) {
-    val displayName: String get() = buildString {
-        append(handler.ifBlank { "Unknown Handler" })
-        if (dog.isNotBlank()) {
-            append(" & ")
-            append(dog)
-        }
-    }
-}
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlinx.serialization.decodeFromString
 
 @Serializable
 data class TimeWarpUiState(
@@ -60,6 +38,29 @@ data class TimeWarpUiState(
     val activeParticipant: TimeWarpParticipant? = null,
     val queue: List<TimeWarpParticipant> = emptyList(),
     val completed: List<TimeWarpParticipant> = emptyList()
+)
+
+@Serializable
+data class TimeWarpParticipantData(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val completedAt: String
+)
+
+@Serializable
+data class TimeWarpRoundExport(
+    val gameMode: String,
+    val exportTimestamp: String,
+    val participantData: TimeWarpParticipantData,
+    val roundResults: TimeWarpRoundResult,
+    val roundLog: List<String>
+)
+
+@Serializable
+data class PendingJsonExport(
+    val filename: String,
+    val content: String
 )
 
 class TimeWarpScreenModel : ScreenModel {
@@ -112,46 +113,174 @@ class TimeWarpScreenModel : ScreenModel {
         }
     }
 
-    fun handleZoneClick(zone: Int) {
-        if (zone !in _uiState.value.clickedZones) {
-            _uiState.update { currentState ->
-                currentState.copy(
-                    score = currentState.score + 5,
-                    clickedZones = currentState.clickedZones + zone
-                )
-            }
-            checkTimePoints()
-            persistState()
-        }
-    }
+    enum class ImportMode { ReplaceAll, Add }
 
-    private fun checkTimePoints() {
-        if (!_uiState.value.clickedZones.contains(3)) {
-            // Logic for time points based on remaining time
-            // Example points logic
-            val bonus = _uiState.value.timeRemaining.roundToInt()
-            _uiState.update { currentState ->
-                currentState.copy(
-                    score = currentState.score + bonus
+    private fun applyImportedParticipants(players: List<TimeWarpParticipant>, mode: ImportMode) {
+        if (players.isEmpty()) return
+        _uiState.update { s ->
+            when (mode) {
+                ImportMode.ReplaceAll -> s.copy(
+                    activeParticipant = players.first(),
+                    queue = players.drop(1),
+                    completed = emptyList()
                 )
-            }
-        }
-    }
-
-    fun handleSweetSpotClick() {
-        if (_uiState.value.clickedZones.contains(3)) { // Only allow if all 3 zones are clicked
-            _uiState.update { currentState ->
-                val newScore = if (!currentState.sweetSpotClicked) {
-                    currentState.score + 25
-                } else {
-                    currentState.score - 25
+                ImportMode.Add -> {
+                    if (s.activeParticipant == null) {
+                        s.copy(activeParticipant = players.first(), queue = players.drop(1))
+                    } else {
+                        s.copy(queue = s.queue + players)
+                    }
                 }
-                currentState.copy(
-                    score = newScore,
-                    sweetSpotClicked = !currentState.sweetSpotClicked
+            }
+        }
+        resetRoundStateOnly()
+        persistState()
+    }
+
+    fun importParticipantsFromCsv(csvText: String, mode: ImportMode = ImportMode.ReplaceAll) {
+        val imported = parseCsv(csvText).map {
+            TimeWarpParticipant(handler = it.handler, dog = it.dog, utn = it.utn)
+        }
+        applyImportedParticipants(imported, mode)
+    }
+
+    fun importParticipantsFromXlsx(xlsxBytes: ByteArray, mode: ImportMode = ImportMode.ReplaceAll) {
+        val imported = parseXlsx(xlsxBytes).map {
+            TimeWarpParticipant(handler = it.handler, dog = it.dog, utn = it.utn)
+        }
+        applyImportedParticipants(imported, mode)
+    }
+
+    // Per-participant action log (keep current only; efficient like Fireball)
+    private val _currentParticipantLog = MutableStateFlow<List<String>>(emptyList())
+    val currentParticipantLog = _currentParticipantLog.asStateFlow()
+
+    private fun logEvent(message: String) {
+        val ts = Clock.System.now().toString()
+        _currentParticipantLog.update { (it + "$ts: $message").takeLast(300) }
+    }
+
+    private val exportJson = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        prettyPrint = true
+        prettyPrintIndent = "  "
+    }
+
+    private val _pendingJsonExport = MutableStateFlow<PendingJsonExport?>(null)
+    val pendingJsonExport = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
+
+    // --- Next/Skip ---
+
+    private fun buildCurrentRoundResult(): TimeWarpRoundResult {
+        val s = _uiState.value
+        val zonesCaught = s.clickedZones.size
+
+        // React behavior: time is added ON STOP; in our UI we don't have a separate Stop button yet.
+        // For export, we include current score and current remaining time.
+        return TimeWarpRoundResult(
+            score = s.score,
+            timeRemaining = s.timeRemaining,
+            misses = s.misses,
+            zonesCaught = zonesCaught,
+            sweetSpot = s.sweetSpotClicked,
+            allRollers = s.allRollersClicked
+        )
+    }
+
+    fun nextParticipant() {
+        logEvent("Next")
+        val current = _uiState.value.activeParticipant
+
+        if (current != null) {
+            val result = buildCurrentRoundResult()
+            val updated = current.copy(result = result)
+
+            // JSON export (prompted via UI)
+            val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+            val stamp = timeWarpTimestamp(now)
+            val safeHandler = updated.handler.replace("\\s+".toRegex(), "")
+            val safeDog = updated.dog.replace("\\s+".toRegex(), "")
+            val filename = "TimeWarp_${safeHandler}_${safeDog}_$stamp.json"
+
+            val exportData = TimeWarpRoundExport(
+                gameMode = "TimeWarp",
+                exportTimestamp = Clock.System.now().toString(),
+                participantData = TimeWarpParticipantData(
+                    handler = updated.handler,
+                    dog = updated.dog,
+                    utn = updated.utn,
+                    completedAt = now.toString()
+                ),
+                roundResults = result,
+                roundLog = _currentParticipantLog.value
+            )
+
+            _pendingJsonExport.value = PendingJsonExport(
+                filename = filename,
+                content = exportJson.encodeToString(exportData)
+            )
+
+            _uiState.update { s ->
+                s.copy(
+                    activeParticipant = null,
+                    completed = s.completed + updated
                 )
             }
-            persistState()
+        }
+
+        // Advance to next in queue; if none, create blank active participant like Fireball
+        val next = _uiState.value.queue.firstOrNull()
+        _currentParticipantLog.value = emptyList()
+
+        if (next == null) {
+            _uiState.update { s ->
+                s.copy(activeParticipant = TimeWarpParticipant("", "", ""), queue = emptyList())
+            }
+        } else {
+            _uiState.update { s ->
+                s.copy(activeParticipant = next, queue = s.queue.drop(1))
+            }
+        }
+
+        resetRoundStateOnly()
+        persistState()
+    }
+
+    fun skipParticipant() {
+        logEvent("Skip")
+        val s = _uiState.value
+        val current = s.activeParticipant ?: return
+        val next = s.queue.firstOrNull() ?: return
+
+        _uiState.update {
+            it.copy(
+                activeParticipant = next,
+                queue = it.queue.drop(1) + current
+            )
+        }
+        _currentParticipantLog.value = emptyList()
+        resetRoundStateOnly()
+        persistState()
+    }
+
+    private fun resetRoundStateOnly() {
+        timerJob?.cancel()
+        _uiState.update { s ->
+            s.copy(
+                score = 0,
+                misses = 0,
+                ob = 0,
+                clickedZones = emptySet(),
+                sweetSpotClicked = false,
+                allRollersClicked = false,
+                timeRemaining = 60.0f,
+                isTimerRunning = false
+            )
         }
     }
 
@@ -222,7 +351,39 @@ class TimeWarpScreenModel : ScreenModel {
         persistState()
     }
 
+    fun handleZoneClick(zone: Int) {
+        if (zone !in _uiState.value.clickedZones) {
+            logEvent("Zone $zone")
+            _uiState.update { currentState ->
+                currentState.copy(
+                    score = currentState.score + 5,
+                    clickedZones = currentState.clickedZones + zone
+                )
+            }
+            persistState()
+        }
+    }
+
+    fun handleSweetSpotClick() {
+        logEvent("Sweet Spot")
+        if (_uiState.value.clickedZones.size >= 3) {
+            _uiState.update { currentState ->
+                val newScore = if (!currentState.sweetSpotClicked) {
+                    currentState.score + 25
+                } else {
+                    currentState.score - 25
+                }
+                currentState.copy(
+                    score = newScore,
+                    sweetSpotClicked = !currentState.sweetSpotClicked
+                )
+            }
+            persistState()
+        }
+    }
+
     fun toggleAllRollers() {
+        logEvent("All Rollers")
         _uiState.update { currentState ->
             currentState.copy(
                 allRollersClicked = !currentState.allRollersClicked
@@ -232,6 +393,7 @@ class TimeWarpScreenModel : ScreenModel {
     }
 
     fun flipField() {
+        logEvent("Flip Field")
         _uiState.update { currentState ->
             currentState.copy(
                 fieldFlipped = !currentState.fieldFlipped
@@ -241,8 +403,22 @@ class TimeWarpScreenModel : ScreenModel {
     }
 
     fun reset() {
-        _uiState.value = TimeWarpUiState() // Reset to initial state
+        logEvent("Reset")
+        _uiState.value = TimeWarpUiState(activeParticipant = _uiState.value.activeParticipant, queue = _uiState.value.queue, completed = _uiState.value.completed)
         timerJob?.cancel()
         persistState()
+    }
+}
+
+private fun timeWarpTimestamp(now: kotlinx.datetime.LocalDateTime): String {
+    fun pad2(n: Int) = n.toString().padStart(2, '0')
+    return buildString {
+        append(now.year)
+        append(pad2(now.monthNumber))
+        append(pad2(now.dayOfMonth))
+        append('_')
+        append(pad2(now.hour))
+        append(pad2(now.minute))
+        append(pad2(now.second))
     }
 }

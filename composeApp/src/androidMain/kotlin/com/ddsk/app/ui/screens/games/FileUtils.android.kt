@@ -9,10 +9,17 @@ import org.apache.poi.ss.usermodel.CellType
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
+import kotlin.math.roundToInt
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import java.util.Locale
+
+// Force consistent symbol resolution for expect/actual matching under K2
+import com.ddsk.app.ui.screens.games.FarOutParticipant
+import com.ddsk.app.ui.screens.games.GreedyScreenModel
+import com.ddsk.app.ui.screens.games.TimeWarpParticipant
 
 @Composable
 actual fun rememberFileExporter(): FileExporter {
@@ -106,7 +113,7 @@ actual fun parseXlsxRows(bytes: ByteArray): List<List<String>> {
                         CellType.NUMERIC -> {
                             // Check if date or just number
                             val num = cell.numericCellValue
-                            if (num % 1.0 == 0.0) String.format("%.0f", num) else num.toString()
+                            if (num % 1.0 == 0.0) String.format(Locale.US, "%.0f", num) else num.toString()
                         }
                         CellType.BOOLEAN -> cell.booleanCellValue.toString()
                         else -> ""
@@ -198,7 +205,7 @@ actual fun generateFarOutXlsx(participants: List<FarOutParticipant>, templateByt
 }
 
 
-actual fun generateGreedyXlsx(participants: List<GreedyScreenModel.GreedyParticipant>, templateBytes: ByteArray): ByteArray {
+actual fun generateGreedyXlsx(participants: List<GreedyParticipant>, templateBytes: ByteArray): ByteArray {
     try {
         val inputStream = ByteArrayInputStream(templateBytes)
         val workbook = WorkbookFactory.create(inputStream)
@@ -211,7 +218,7 @@ actual fun generateGreedyXlsx(participants: List<GreedyScreenModel.GreedyPartici
 
         // Sort participants
         val sortedParticipants = participants.sortedWith(
-            compareByDescending<GreedyScreenModel.GreedyParticipant> { it.score }
+            compareByDescending<GreedyParticipant> { it.score }
                 .thenByDescending { it.zone4Catches }
                 .thenByDescending { it.zone3Catches }
                 .thenByDescending { it.zone2Catches }
@@ -359,6 +366,65 @@ actual fun generateFireballXlsx(participants: List<FireballParticipant>, templat
 
             // Column K (10): Height Division
             row.createCell(10).setCellValue(p.heightDivision)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
+actual fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 4 // Excel row 5
+
+        // Sort similarly to React: score desc, then timeRemaining (rounded) desc
+        val sorted = participants.sortedWith(
+            compareByDescending<TimeWarpParticipant> { it.result?.score ?: 0 }
+                .thenByDescending { it.result?.timeRemaining?.roundToInt() ?: 0 }
+        )
+
+        var outIndex = 0
+        sorted.forEach { p ->
+            val r = p.result ?: return@forEach
+
+            // Skip participants with no scoring data (align with React export behavior)
+            val hasAnyData = r.score != 0 || r.misses != 0 || r.zonesCaught != 0 || r.sweetSpot || r.allRollers || r.timeRemaining != 60.0f
+            if (!hasAnyData) return@forEach
+
+            val rowNum = startRow + outIndex
+            outIndex += 1
+
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+
+            // Column A (0): Level
+            row.createCell(0).setCellValue(1.0)
+            // Column B (1): Handler
+            row.createCell(1).setCellValue(p.handler)
+            // Column C (2): Dog
+            row.createCell(2).setCellValue(p.dog)
+            // Column D (3): UTN
+            row.createCell(3).setCellValue(p.utn)
+
+            // Column E (4): Time Remaining (0.00)
+            row.createCell(4).setCellValue(r.timeRemaining.toDouble())
+            // Column F (5): Time Remaining Rounded
+            row.createCell(5).setCellValue(r.timeRemaining.roundToInt().toDouble())
+            // Column G (6): Misses
+            row.createCell(6).setCellValue(r.misses.toDouble())
+            // Column H (7): Zones Caught
+            row.createCell(7).setCellValue(r.zonesCaught.toDouble())
+            // Column I (8): Sweet Spot (Y/N)
+            row.createCell(8).setCellValue(if (r.sweetSpot) "Y" else "N")
+            // Column L (11): All Rollers (Y/N)
+            row.createCell(11).setCellValue(if (r.allRollers) "Y" else "N")
         }
 
         ByteArrayOutputStream().use { bos ->

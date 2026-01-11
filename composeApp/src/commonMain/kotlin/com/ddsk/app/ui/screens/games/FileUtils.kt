@@ -1,7 +1,6 @@
 package com.ddsk.app.ui.screens.games
 
 import androidx.compose.runtime.Composable
-import com.ddsk.app.ui.screens.games.FarOutParticipant
 
 // Consolidated from FileUtils.kt and GameImporter.kt
 data class ImportedParticipant(
@@ -57,10 +56,11 @@ expect fun rememberFilePicker(onResult: (ImportResult) -> Unit): FilePickerLaunc
 
 // These expected functions might be implemented differently on each platform
 expect fun parseXlsx(bytes: ByteArray): List<ImportedParticipant>
-expect fun generateFarOutXlsx(participants: List<FarOutParticipant>, templateBytes: ByteArray): ByteArray
-expect fun generateGreedyXlsx(participants: List<GreedyScreenModel.GreedyParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateFarOutXlsx(participants: List<com.ddsk.app.ui.screens.games.FarOutParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateGreedyXlsx(participants: List<com.ddsk.app.ui.screens.games.GreedyParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateFourWayPlayXlsx(participants: List<FourWayPlayExportParticipant>, templateBytes: ByteArray): ByteArray
-expect fun generateFireballXlsx(participants: List<FireballParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateFireballXlsx(participants: List<com.ddsk.app.ui.screens.games.FireballParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateTimeWarpXlsx(participants: List<com.ddsk.app.ui.screens.games.TimeWarpParticipant>, templateBytes: ByteArray): ByteArray
 
 // From GameImporter.kt
 expect fun parseXlsxRows(bytes: ByteArray): List<List<String>>
@@ -158,4 +158,3 @@ interface AssetLoader {
 
 @Composable
 expect fun rememberAssetLoader(): AssetLoader
-

@@ -707,6 +707,8 @@ data class FireballParticipant(
     val completedBoardsTotal: Int = 0
 )
 
+// Ensure the rest of the file refers to this stable top-level type.
+
 @Serializable
 private data class FireballRoundResults(
     val nonFireballPoints: Int,

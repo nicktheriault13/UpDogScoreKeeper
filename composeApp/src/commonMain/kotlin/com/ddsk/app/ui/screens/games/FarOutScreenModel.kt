@@ -18,30 +18,8 @@ import kotlinx.serialization.json.Json
 import kotlin.math.max
 import kotlin.math.round
 
-private typealias ThrowValue = String
-
-@Serializable
-data class FarOutParticipant(
-    val handler: String,
-    val dog: String,
-    val utn: String,
-    val jumpHeight: String = "",
-    val heightDivision: String = "",
-    val clubDivision: String = "",
-    val throw1: ThrowValue = "",
-    val throw2: ThrowValue = "",
-    val throw3: ThrowValue = "",
-    val sweetShot: ThrowValue = "",
-    val sweetShotDeclined: Boolean = false,
-    val allRollers: Boolean = false,
-    val throw1Miss: Boolean = false,
-    val throw2Miss: Boolean = false,
-    val throw3Miss: Boolean = false,
-    val sweetShotMiss: Boolean = false,
-    val score: Double = 0.0,
-    val misses: Int = 0,
-    val logId: Long = 0L,
-)
+// NOTE: FarOutParticipant is defined in ExportParticipants.kt (commonMain).
+// Do not redeclare or typealias it here.
 
 @Serializable
 data class FarOutLogEntry(

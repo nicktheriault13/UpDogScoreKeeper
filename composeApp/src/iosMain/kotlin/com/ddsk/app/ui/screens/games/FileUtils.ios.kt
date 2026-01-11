@@ -39,3 +39,5 @@ actual fun generateGreedyXlsx(participants: List<GreedyScreenModel.GreedyPartici
 actual fun generateFourWayPlayXlsx(participants: List<FourWayPlayExportParticipant>, templateBytes: ByteArray): ByteArray = ByteArray(0)
 
 actual fun generateFireballXlsx(participants: List<FireballParticipant>, templateBytes: ByteArray): ByteArray = ByteArray(0)
+
+actual fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templateBytes: ByteArray): ByteArray = ByteArray(0)

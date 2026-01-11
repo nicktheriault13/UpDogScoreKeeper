@@ -16,22 +16,7 @@ import kotlinx.serialization.json.Json
 
 class GreedyScreenModel : ScreenModel {
 
-    @Serializable
-    data class GreedyParticipant(
-        val handler: String,
-        val dog: String,
-        val utn: String,
-        // Game stats
-        val zone1Catches: Int = 0,
-        val zone2Catches: Int = 0,
-        val zone3Catches: Int = 0,
-        val zone4Catches: Int = 0,
-        val finishOnSweetSpot: Boolean = false,
-        val sweetSpotBonus: Int = 0,
-        val numberOfMisses: Int = 0,
-        val allRollers: Boolean = false,
-        val score: Int = 0
-    )
+    // NOTE: GreedyParticipant is defined in ExportParticipants.kt (commonMain).
 
     @Serializable
     data class GreedyPersistedState(
