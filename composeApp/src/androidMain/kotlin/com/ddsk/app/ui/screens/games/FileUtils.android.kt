@@ -20,7 +20,8 @@ actual fun rememberFileExporter(): FileExporter {
     var pendingData by remember { mutableStateOf<ByteArray?>(null) }
 
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/vnd.ms-excel.sheet.macroEnabled.12"),
+        // Use XLSX MIME type so Android doesn't force a .xlsm extension.
+        contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         onResult = { uri ->
             if (uri != null && pendingData != null) {
                 try {
@@ -291,6 +292,75 @@ actual fun generateFourWayPlayXlsx(participants: List<FourWayPlayExportParticipa
             row.createCell(14).setCellValue(p.heightDivision)
             row.createCell(15).setCellValue(p.misses.toDouble())
         }
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
+actual fun generateFireballXlsx(participants: List<FireballParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4
+
+        // Debug: detect if all participants appear to have zero scoring.
+        val allZero = participants.isNotEmpty() && participants.all {
+            it.nonFireballPoints == 0 && it.fireballPoints == 0 && (it.highestZone ?: 0) == 0 && it.totalPoints == 0
+        }
+        if (allZero) {
+            val row = worksheet.getRow(startRow) ?: worksheet.createRow(startRow)
+            row.createCell(12).setCellValue("DEBUG: all participant totals are zero at export time")
+        }
+
+        val sorted = participants.sortedWith(
+            compareByDescending<FireballParticipant> { it.totalPoints }
+                .thenByDescending { it.highestZone ?: 0 }
+                .thenByDescending { it.fireballPoints }
+        )
+
+        sorted.forEachIndexed { index, p ->
+            val rowNum = startRow + index
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+
+            row.createCell(0).setCellValue(1.0)
+            row.createCell(1).setCellValue(p.handler)
+            row.createCell(2).setCellValue(p.dog)
+            row.createCell(3).setCellValue(p.utn)
+
+            // Column E (4): Regular / non-fireball points
+            val sweetSpot = p.sweetSpotBonus.coerceIn(0, 8)
+            val adjustedNonFireball = when (sweetSpot) {
+                4 -> (p.nonFireballPoints - 4).coerceAtLeast(0)
+                else -> p.nonFireballPoints
+            }
+            row.createCell(4).setCellValue(adjustedNonFireball.toDouble())
+
+            // Column F (5): Fireball points excluding sweet spot
+            val adjustedFireball = when (sweetSpot) {
+                8 -> (p.fireballPoints - 8).coerceAtLeast(0)
+                else -> p.fireballPoints
+            }
+            row.createCell(5).setCellValue(adjustedFireball.toDouble())
+
+            // Column G (6): Sweet spot points * 2
+            row.createCell(6).setCellValue((sweetSpot * 2).toDouble())
+
+            // Column H (7): Farthest zone caught / highest zone
+            row.createCell(7).setCellValue((p.highestZone ?: 0).toDouble())
+
+            // Column J (9): All Rollers (Y/N)
+            row.createCell(9).setCellValue(if (p.allRollers) "Y" else "N")
+
+            // Column K (10): Height Division
+            row.createCell(10).setCellValue(p.heightDivision)
+        }
+
         ByteArrayOutputStream().use { bos ->
             workbook.write(bos)
             workbook.close()

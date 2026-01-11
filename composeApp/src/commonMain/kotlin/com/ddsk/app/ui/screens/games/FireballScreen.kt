@@ -51,6 +51,9 @@ import cafe.adriel.voyager.core.screen.Screen
 import com.ddsk.app.persistence.rememberDataStore
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 object FireballScreen : Screen {
     @Composable
@@ -73,13 +76,13 @@ object FireballScreen : Screen {
         val sweetSpotBonusAwarded by screenModel.sweetSpotBonusAwarded.collectAsState()
         val sidebarCollapsed by screenModel.sidebarCollapsed.collectAsState()
         val sidebarMessage by screenModel.sidebarMessage.collectAsState()
+        val completedParticipants by screenModel.completedParticipants.collectAsState()
 
         val remainingParticipants = participantsQueue.filterNot { participant ->
-            val stats = participant.stats
-            val hasScoring = stats.totalPoints > 0
-                    || stats.nonFireballPoints > 0
-                    || stats.fireballPoints > 0
-                    || stats.completedBoards > 0
+            val hasScoring = participant.totalPoints > 0
+                    || participant.nonFireballPoints > 0
+                    || participant.fireballPoints > 0
+                    || participant.completedBoards > 0
             hasScoring
         }
 
@@ -87,15 +90,84 @@ object FireballScreen : Screen {
         val scope = rememberCoroutineScope()
 
         val fileExporter = rememberFileExporter()
+        val assetLoader = rememberAssetLoader()
+
+        // Hold the latest file import payload until the user chooses Add vs Replace.
+        var pendingImport by remember { mutableStateOf<ImportResult?>(null) }
+        var showImportChoiceDialog by remember { mutableStateOf(false) }
 
         val filePicker = rememberFilePicker { result ->
-            scope.launch {
-                when (result) {
-                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
-                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
-                    else -> {}
+            when (result) {
+                is ImportResult.Csv, is ImportResult.Xlsx -> {
+                    pendingImport = result
+                    showImportChoiceDialog = true
                 }
+                else -> {}
             }
+        }
+
+        if (showImportChoiceDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    showImportChoiceDialog = false
+                    pendingImport = null
+                },
+                title = { Text("Import participants") },
+                text = { Text("Do you want to add the new participants to the existing list, or delete all existing participants and replace them?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val import = pendingImport
+                            showImportChoiceDialog = false
+                            pendingImport = null
+                            if (import != null) {
+                                scope.launch {
+                                    when (import) {
+                                        is ImportResult.Csv -> screenModel.importParticipantsFromCsv(import.contents, FireballScreenModel.ImportMode.Add)
+                                        is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(import.bytes, FireballScreenModel.ImportMode.Add)
+                                        else -> {}
+                                    }
+                                }
+                            }
+                        }
+                    ) { Text("Add") }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(
+                            onClick = {
+                                val import = pendingImport
+                                showImportChoiceDialog = false
+                                pendingImport = null
+                                if (import != null) {
+                                    scope.launch {
+                                        when (import) {
+                                            is ImportResult.Csv -> screenModel.importParticipantsFromCsv(import.contents, FireballScreenModel.ImportMode.ReplaceAll)
+                                            is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(import.bytes, FireballScreenModel.ImportMode.ReplaceAll)
+                                            else -> {}
+                                        }
+                                    }
+                                }
+                            }
+                        ) { Text("Replace") }
+                        TextButton(
+                            onClick = {
+                                showImportChoiceDialog = false
+                                pendingImport = null
+                            }
+                        ) { Text("Cancel") }
+                    }
+                }
+            )
+        }
+
+        val pendingJsonExport by screenModel.pendingJsonExport.collectAsState()
+
+        LaunchedEffect(pendingJsonExport) {
+            val pending = pendingJsonExport ?: return@LaunchedEffect
+            // Multiplatform: always prompt user to choose a save location where possible.
+            saveJsonFileWithPicker(pending.filename, pending.content)
+            screenModel.consumePendingJsonExport()
         }
 
         Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
@@ -134,8 +206,42 @@ object FireballScreen : Screen {
                             onImport = { filePicker.launch() },
                             onExport = {
                                 scope.launch {
-                                    val json = screenModel.exportAsJson()
-                                    fileExporter.save("Fireball_Export.json", json.encodeToByteArray())
+                                    val templateBytes = assetLoader.load("templates/UDC Fireball Data Entry L1 Div Sort.xlsx")
+                                    if (templateBytes == null) {
+                                        screenModel.sidebarMessage.value = "Template missing: UDC Fireball Data Entry L1 Div Sort.xlsx"
+                                        return@launch
+                                    }
+
+                                    // React behavior: export committed participant totals (completed rounds).
+                                    // Active participant may have in-progress board state and should not be included unless
+                                    // the user has advanced with Next (which commits and adds to completedParticipants).
+                                    val participants = completedParticipants
+
+                                    if (participants.isEmpty()) {
+                                        screenModel.sidebarMessage.value = "Export: no completed participants yet (press Next to commit a round)"
+                                        return@launch
+                                    }
+
+                                    val firstNonZero = participants.firstOrNull {
+                                        it.totalPoints != 0 || it.nonFireballPoints != 0 || it.fireballPoints != 0 || (it.highestZone ?: 0) != 0
+                                    }
+                                    screenModel.sidebarMessage.value = if (firstNonZero == null) {
+                                        "Export debug: completed participants still look zero (count=${participants.size})"
+                                    } else {
+                                        "Export debug (completed): ${firstNonZero.handler}/${firstNonZero.dog} NF=${firstNonZero.nonFireballPoints} FB=${firstNonZero.fireballPoints} SS=${firstNonZero.sweetSpotBonus} HZ=${firstNonZero.highestZone ?: 0} TOT=${firstNonZero.totalPoints}"
+                                    }
+
+                                    val exported = generateFireballXlsx(participants, templateBytes)
+                                    if (exported.isEmpty()) {
+                                        screenModel.sidebarMessage.value = "Export failed"
+                                        return@launch
+                                    }
+
+                                    val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                    val stamp = fireballTimestamp(now)
+
+                                    fileExporter.save("Fireball_Scores_$stamp.xlsx", exported)
+                                    screenModel.sidebarMessage.value = "Exported Fireball_Scores_$stamp.xlsx"
                                 }
                             },
                             onHelp = screenModel::openHelp,
@@ -549,11 +655,26 @@ private fun ZoneButton(value: Int, clicked: Boolean, fireball: Boolean, onClick:
     }
     Button(
         onClick = onClick,
-        enabled = !(clicked && !fireball),
+        // Allow toggling/clearing when Fireball Mode is active.
+        // The screen model itself enforces the rules when Fireball Mode is NOT active.
+        enabled = true,
         colors = colors,
         modifier = Modifier.fillMaxSize().padding(6.dp),
         shape = RoundedCornerShape(12.dp)
     ) {
         Text(value.toString(), fontSize = 28.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun fireballTimestamp(now: kotlinx.datetime.LocalDateTime): String {
+    fun pad2(n: Int) = n.toString().padStart(2, '0')
+    return buildString {
+        append(now.year)
+        append(pad2(now.monthNumber))
+        append(pad2(now.dayOfMonth))
+        append('_')
+        append(pad2(now.hour))
+        append(pad2(now.minute))
+        append(pad2(now.second))
     }
 }

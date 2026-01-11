@@ -271,3 +271,53 @@ actual fun generateFourWayPlayXlsx(participants: List<FourWayPlayExportParticipa
         ByteArray(0)
     }
 }
+
+actual fun generateFireballXlsx(participants: List<FireballParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3
+
+        val sorted = participants.sortedWith(
+            compareByDescending<FireballParticipant> { it.totalPoints }
+                .thenByDescending { it.highestZone ?: 0 }
+                .thenByDescending { it.fireballPoints }
+        )
+
+        sorted.forEachIndexed { index, p ->
+            val row = worksheet.getRow(startRow + index) ?: worksheet.createRow(startRow + index)
+            row.createCell(0).setCellValue(1.0)
+            row.createCell(1).setCellValue(p.handler)
+            row.createCell(2).setCellValue(p.dog)
+            row.createCell(3).setCellValue(p.utn)
+
+            val sweetSpot = p.sweetSpotBonus.coerceIn(0, 8)
+
+            val adjustedNonFireball = when (sweetSpot) {
+                4 -> (p.nonFireballPoints - 4).coerceAtLeast(0)
+                else -> p.nonFireballPoints
+            }
+            row.createCell(4).setCellValue(adjustedNonFireball.toDouble())
+
+            val adjustedFireball = when (sweetSpot) {
+                8 -> (p.fireballPoints - 8).coerceAtLeast(0)
+                else -> p.fireballPoints
+            }
+            row.createCell(5).setCellValue(adjustedFireball.toDouble())
+
+            row.createCell(6).setCellValue((sweetSpot * 2).toDouble())
+            row.createCell(7).setCellValue((p.highestZone ?: 0).toDouble())
+            row.createCell(9).setCellValue(if (p.allRollers) "Y" else "N")
+            row.createCell(10).setCellValue(p.heightDivision)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}

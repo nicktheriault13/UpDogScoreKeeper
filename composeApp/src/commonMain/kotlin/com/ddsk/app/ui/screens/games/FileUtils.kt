@@ -60,6 +60,7 @@ expect fun parseXlsx(bytes: ByteArray): List<ImportedParticipant>
 expect fun generateFarOutXlsx(participants: List<FarOutParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateGreedyXlsx(participants: List<GreedyScreenModel.GreedyParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateFourWayPlayXlsx(participants: List<FourWayPlayExportParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateFireballXlsx(participants: List<FireballParticipant>, templateBytes: ByteArray): ByteArray
 
 // From GameImporter.kt
 expect fun parseXlsxRows(bytes: ByteArray): List<List<String>>
@@ -157,3 +158,4 @@ interface AssetLoader {
 
 @Composable
 expect fun rememberAssetLoader(): AssetLoader
+

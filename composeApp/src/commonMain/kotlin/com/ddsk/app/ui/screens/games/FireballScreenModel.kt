@@ -1,45 +1,58 @@
 package com.ddsk.app.ui.screens.games
 
+// NOTE: this file was previously truncated and contained an unterminated comment causing compilation to fail.
+
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 class FireballScreenModel : ScreenModel {
 
     companion object {
-        /**
-         * Fire Ball 3x3 scoring grid used by the UI. `null` denotes an empty cell.
-         */
+        /** Fire Ball scoring grid values (8 zones). */
         val zoneValueGrid: List<List<Int?>> = listOf(
             listOf(8, 7, 5),
             listOf(6, 4, 2),
             listOf(3, 1, null)
         )
 
-        fun zoneValue(row: Int, col: Int): Int? = zoneValueGrid
-            .getOrNull(row)
-            ?.getOrNull(col)
+        fun zoneValue(row: Int, col: Int): Int? = zoneValueGrid.getOrNull(row)?.getOrNull(col)
 
         private const val TIMER_DEFAULT_SECONDS = 64
+
+        private val REQUIRED_ZONES: Set<FireballGridPoint> = buildSet {
+            zoneValueGrid.forEachIndexed { r, cols ->
+                cols.forEachIndexed { c, v ->
+                    if (v != null) add(FireballGridPoint(r, c))
+                }
+            }
+        }
     }
 
-    // --- Persistent state container ---
+    // ---- state ----
 
     private val _activeParticipant = MutableStateFlow<FireballParticipant?>(null)
     val activeParticipant: StateFlow<FireballParticipant?> = _activeParticipant.asStateFlow()
 
     private val _participantsQueue = MutableStateFlow<List<FireballParticipant>>(emptyList())
     val participantsQueue: StateFlow<List<FireballParticipant>> = _participantsQueue.asStateFlow()
+
+    private val _completedParticipants = MutableStateFlow<List<FireballParticipant>>(emptyList())
+    val completedParticipants: StateFlow<List<FireballParticipant>> = _completedParticipants.asStateFlow()
 
     private val _clickedZones = MutableStateFlow<Set<FireballGridPoint>>(emptySet())
     val clickedZones: StateFlow<Set<FireballGridPoint>> = _clickedZones.asStateFlow()
@@ -64,7 +77,6 @@ class FireballScreenModel : ScreenModel {
 
     val sidebarMessage = MutableStateFlow("")
 
-    // Derived scores for UI
     private val _currentBoardScore = MutableStateFlow(0)
     val currentBoardScore: StateFlow<Int> = _currentBoardScore.asStateFlow()
 
@@ -80,6 +92,15 @@ class FireballScreenModel : ScreenModel {
 
     private var timerJob: Job? = null
 
+    // Per-participant action log (efficient: only keep current participant log in memory)
+    private val _currentParticipantLog = MutableStateFlow<List<String>>(emptyList())
+    val currentParticipantLog: StateFlow<List<String>> = _currentParticipantLog.asStateFlow()
+
+    private fun logEvent(message: String) {
+        val ts = Clock.System.now().toString()
+        _currentParticipantLog.value = (_currentParticipantLog.value + "$ts: $message").takeLast(300)
+    }
+
     // Persistence
     private var dataStore: DataStore? = null
     private val persistenceKey = "FireballData.json"
@@ -87,6 +108,13 @@ class FireballScreenModel : ScreenModel {
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+    }
+
+    private val exportJson = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        prettyPrint = true
+        prettyPrintIndent = "  "
     }
 
     fun initPersistence(store: DataStore) {
@@ -98,7 +126,6 @@ class FireballScreenModel : ScreenModel {
                     val snapshot = json.decodeFromString<FireballPersistedState>(raw)
                     restore(snapshot)
                 }.onFailure {
-                    // If corrupt, don't crash; just start clean
                     sidebarMessage.value = "Failed to load saved game"
                 }
             }
@@ -109,6 +136,8 @@ class FireballScreenModel : ScreenModel {
     private fun restore(state: FireballPersistedState) {
         _activeParticipant.value = state.activeParticipant
         _participantsQueue.value = state.queue
+        _completedParticipants.value = state.completed
+        _currentParticipantLog.value = state.currentParticipantLog
         _clickedZones.value = state.clickedZones.map { FireballGridPoint(it.row, it.col) }.toSet()
         _fireballZones.value = state.fireballZones.map { FireballGridPoint(it.row, it.col) }.toSet()
         _isFireballActive.value = state.isFireballActive
@@ -124,6 +153,8 @@ class FireballScreenModel : ScreenModel {
         val snapshot = FireballPersistedState(
             activeParticipant = _activeParticipant.value,
             queue = _participantsQueue.value,
+            completed = _completedParticipants.value,
+            currentParticipantLog = _currentParticipantLog.value,
             clickedZones = _clickedZones.value.map { FireballGridPointDTO(it.row, it.col) },
             fireballZones = _fireballZones.value.map { FireballGridPointDTO(it.row, it.col) },
             isFireballActive = _isFireballActive.value,
@@ -138,7 +169,7 @@ class FireballScreenModel : ScreenModel {
         }
     }
 
-    // --- Gameplay actions ---
+    // ---- Participants ----
 
     fun toggleSidebar() {
         _sidebarCollapsed.value = !_sidebarCollapsed.value
@@ -148,6 +179,7 @@ class FireballScreenModel : ScreenModel {
     fun clearParticipantsQueue() {
         _activeParticipant.value = null
         _participantsQueue.value = emptyList()
+        _completedParticipants.value = emptyList()
         clearBoard()
         recomputeScores()
         persistState()
@@ -162,96 +194,410 @@ class FireballScreenModel : ScreenModel {
         persistState()
     }
 
-    fun importParticipantsFromCsv(csvText: String) {
-        val imported = parseCsv(csvText).map { FireballParticipant(it.handler, it.dog, it.utn) }
-        applyImportedPlayers(imported)
-    }
+    enum class ImportMode { ReplaceAll, Add }
 
-    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
-        val imported = parseXlsx(xlsxData).map { FireballParticipant(it.handler, it.dog, it.utn) }
-        applyImportedPlayers(imported)
-    }
-
-    private fun applyImportedPlayers(players: List<FireballParticipant>) {
+    private fun applyImportedPlayers(players: List<FireballParticipant>, mode: ImportMode) {
         if (players.isEmpty()) return
-        _activeParticipant.value = players.first()
-        _participantsQueue.value = players.drop(1)
-        clearBoard()
+
+        when (mode) {
+            ImportMode.ReplaceAll -> {
+                _activeParticipant.value = players.firstOrNull()
+                _participantsQueue.value = players.drop(1)
+                _completedParticipants.value = emptyList()
+                _currentParticipantLog.value = emptyList()
+            }
+
+            ImportMode.Add -> {
+                // If nothing loaded yet, imported first becomes active.
+                if (_activeParticipant.value == null) {
+                    _activeParticipant.value = players.firstOrNull()
+                    _participantsQueue.value = players.drop(1)
+                } else {
+                    _participantsQueue.value = _participantsQueue.value + players
+                }
+            }
+        }
+
+        clearBoardInternal()
         recomputeScores()
         persistState()
     }
 
+    // Backwards-compatible behavior (used by existing calls): replace all.
+    private fun applyImportedPlayers(players: List<FireballParticipant>) {
+        applyImportedPlayers(players, ImportMode.ReplaceAll)
+    }
+
+    fun importParticipantsFromCsv(csvText: String, mode: ImportMode = ImportMode.ReplaceAll) {
+        val imported = parseCsv(csvText).map {
+            FireballParticipant(it.handler, it.dog, it.utn, heightDivision = it.heightDivision)
+        }
+        applyImportedPlayers(imported, mode)
+    }
+
+    fun importParticipantsFromXlsx(xlsxData: ByteArray, mode: ImportMode = ImportMode.ReplaceAll) {
+        val imported = parseXlsx(xlsxData).map {
+            FireballParticipant(it.handler, it.dog, it.utn, heightDivision = it.heightDivision)
+        }
+        applyImportedPlayers(imported, mode)
+    }
+
+    // ---- Board / scoring ----
+
+    fun clearBoard() {
+        logEvent("Clear Board")
+        clearBoardInternal()
+        recomputeScores()
+        persistState()
+    }
+
+    private fun clearBoardInternal() {
+        _clickedZones.value = emptySet()
+        _fireballZones.value = emptySet()
+        _isFireballActive.value = false
+        _sweetSpotBonusAwarded.value = false
+    }
+
     fun handleZoneClick(row: Int, col: Int) {
         val value = zoneValue(row, col) ?: return
+        logEvent("Zone $value")
         val point = FireballGridPoint(row, col)
 
-        // If already green and we are NOT in fireball mode, ignore (UI disables)
-        if (_clickedZones.value.contains(point) && !_isFireballActive.value) return
+        val clicked = _clickedZones.value
+        val fireballs = _fireballZones.value
 
-        // If already fireball, ignore toggling
-        if (_fireballZones.value.contains(point)) return
+        val isGreen = clicked.contains(point)
+        val isOrange = fireballs.contains(point)
 
-        // First click marks as regular catch, second click (when fireball mode active) marks as fireball
-        if (_clickedZones.value.contains(point) && _isFireballActive.value) {
-            _fireballZones.value = _fireballZones.value + point
+        if (_isFireballActive.value) {
+            // React: toggleable in fireball mode
+            if (isGreen || isOrange) {
+                _clickedZones.value = clicked - point
+                _fireballZones.value = fireballs - point
+            } else {
+                _fireballZones.value = fireballs + point
+            }
         } else {
-            _clickedZones.value = _clickedZones.value + point
+            // React: not toggleable in non-fireball mode
+            if (isGreen || isOrange) return
+            _clickedZones.value = clicked + point
         }
 
-        // If the user clicks the 8-zone as fireball, we still allow.
         recomputeScores(latestClickedValue = value)
         persistState()
 
-        // If all non-null cells are clicked at least once -> auto-advance board
         if (isBoardComplete()) {
             finalizeBoardAndCarryToParticipant()
         }
     }
 
     private fun isBoardComplete(): Boolean {
-        val required = mutableSetOf<FireballGridPoint>()
-        zoneValueGrid.forEachIndexed { r, cols ->
-            cols.forEachIndexed { c, v ->
-                if (v != null) required.add(FireballGridPoint(r, c))
+        val union = _clickedZones.value + _fireballZones.value
+        return REQUIRED_ZONES.isNotEmpty() && union.containsAll(REQUIRED_ZONES)
+    }
+
+    private data class BoardBreakdown(
+        val nonFireballPoints: Int,
+        val fireballPoints: Int,
+        val totalPoints: Int,
+        val highestZone: Int?
+    )
+
+    private fun computeBoardBreakdown(): BoardBreakdown {
+        var nonFire = 0
+        var fire = 0
+        var highest: Int? = null
+
+        val clicked = _clickedZones.value
+        val fireballs = _fireballZones.value
+
+        // IMPORTANT: treat zones in fireballs as fireball points even if they also appear in clicked.
+        // This prevents mis-attribution (fireball points showing up in non-fireball) if a point
+        // accidentally ends up in both sets.
+        val union = clicked + fireballs
+
+        union.forEach { p ->
+            val v = zoneValue(p.row, p.col) ?: return@forEach
+            if (p in fireballs) {
+                fire += v * 2
+            } else {
+                nonFire += v
             }
+            highest = maxOf(highest ?: 0, v)
         }
-        return required.isNotEmpty() && _clickedZones.value.containsAll(required)
+
+        return BoardBreakdown(
+            nonFireballPoints = nonFire,
+            fireballPoints = fire,
+            totalPoints = nonFire + fire,
+            highestZone = highest
+        )
     }
 
     private fun finalizeBoardAndCarryToParticipant() {
-        // When a board completes, add this board's score into participant stats
         val participant = _activeParticipant.value ?: return
-
         val board = computeBoardBreakdown()
-        val newStats = participant.stats.copy(
-            nonFireballPoints = participant.stats.nonFireballPoints + board.nonFireballPoints,
-            fireballPoints = participant.stats.fireballPoints + board.fireballPoints,
-            sweetSpotBonus = participant.stats.sweetSpotBonus + board.sweetSpotBonus,
-            completedBoards = participant.stats.completedBoards + 1,
-            totalPoints = participant.stats.totalPoints + board.totalPoints,
-            completedBoardsTotal = (participant.stats.completedBoardsTotal + board.totalPoints),
-            highestZone = maxOf(participant.stats.highestZone ?: 0, board.highestZone ?: 0).takeIf { it > 0 },
-            allRollers = _allRollersActive.value
+
+        val updatedHighest = maxOf(participant.highestZone ?: 0, board.highestZone ?: 0).takeIf { it > 0 }
+
+        val updated = participant.copy(
+            nonFireballPoints = participant.nonFireballPoints + board.nonFireballPoints,
+            fireballPoints = participant.fireballPoints + board.fireballPoints,
+            completedBoards = participant.completedBoards + 1,
+            completedBoardsTotal = participant.completedBoardsTotal + board.totalPoints,
+            highestZone = updatedHighest,
+            allRollers = _allRollersActive.value,
+            totalPoints = (participant.completedBoardsTotal + board.totalPoints) + participant.sweetSpotBonus
         )
 
-        _activeParticipant.value = participant.copy(stats = newStats)
+        _activeParticipant.value = updated
 
-        // clear board for next board for same participant
         clearBoardInternal()
         recomputeScores()
         sidebarMessage.value = "Board complete"
         persistState()
     }
 
+    private data class PointsSnapshot(
+        val nonFireballPoints: Int,
+        val fireballPoints: Int,
+        val totalPoints: Int,
+        val highestZone: Int?
+    )
+
+    /**
+     * React-style current points:
+     * - participant.nonFireballPoints/fireballPoints represent COMPLETED boards totals only
+     * - current board is derived from clickedZones/fireballZones
+     * - totalPoints = completedBoardsTotal + currentBoardTotal + sweetSpotBonus
+     */
+    private fun calculateCurrentPoints(participant: FireballParticipant?): PointsSnapshot {
+        val p = participant ?: FireballParticipant("", "", "")
+        val board = computeBoardBreakdown()
+
+        val highest = maxOf(p.highestZone ?: 0, board.highestZone ?: 0).takeIf { it > 0 }
+        val total = p.completedBoardsTotal + board.totalPoints + p.sweetSpotBonus
+
+        return PointsSnapshot(
+            // IMPORTANT: these are full totals for display/export (completed + current)
+            nonFireballPoints = p.nonFireballPoints + board.nonFireballPoints,
+            fireballPoints = p.fireballPoints + board.fireballPoints,
+            totalPoints = total,
+            highestZone = highest
+        )
+    }
+
+    private fun finalizeCurrentParticipantForCompletion(raw: FireballParticipant): FireballParticipant {
+        // Commit ONLY what React commits at the time the round ends:
+        // - add the current board's nonFire/fire into participant nonFireballPoints/fireballPoints
+        // - add current board total into completedBoardsTotal and increment completedBoards
+        // - keep sweetSpotBonus as-is (persist)
+        val board = computeBoardBreakdown()
+        val highest = maxOf(raw.highestZone ?: 0, board.highestZone ?: 0).takeIf { it > 0 }
+
+        val committed = raw.copy(
+            nonFireballPoints = raw.nonFireballPoints + board.nonFireballPoints,
+            fireballPoints = raw.fireballPoints + board.fireballPoints,
+            completedBoards = raw.completedBoards + if (board.totalPoints > 0) 1 else 0,
+            completedBoardsTotal = raw.completedBoardsTotal + board.totalPoints,
+            highestZone = highest,
+            totalPoints = (raw.completedBoardsTotal + board.totalPoints) + raw.sweetSpotBonus,
+            allRollers = _allRollersActive.value
+        )
+
+        return committed
+    }
+
+    private fun recomputeScores(latestClickedValue: Int? = null) {
+        val participant = _activeParticipant.value
+        val board = computeBoardBreakdown()
+
+        val sweetSpot = participant?.sweetSpotBonus ?: 0
+        val completedBoardsTotal = participant?.completedBoardsTotal ?: 0
+
+        // UI scores reflect completed boards + current board + sweet spot
+        _currentBoardScore.value = board.totalPoints + sweetSpot
+        _totalScore.value = completedBoardsTotal + board.totalPoints + sweetSpot
+
+        // IMPORTANT: do NOT mutate participant nonFireball/fireball/total/highest here.
+        // Those are persisted totals and are committed only on board completion or Next().
+
+        if (latestClickedValue != null) {
+            val suffix = if (_isFireballActive.value) " (fireball)" else ""
+            sidebarMessage.value = "+$latestClickedValue$suffix"
+        }
+    }
+
+    fun resetGame() {
+        logEvent("Reset Game")
+
+        fun reset(p: FireballParticipant) = p.copy(
+            nonFireballPoints = 0,
+            fireballPoints = 0,
+            totalPoints = 0,
+            sweetSpotBonus = 0,
+            highestZone = null,
+            allRollers = false,
+            completedBoards = 0,
+            completedBoardsTotal = 0
+        )
+
+        _activeParticipant.value = _activeParticipant.value?.let(::reset)
+        _participantsQueue.value = _participantsQueue.value.map(::reset)
+        _completedParticipants.value = _completedParticipants.value.map(::reset)
+
+        clearBoardInternal()
+        recomputeScores()
+        sidebarMessage.value = "Game reset"
+        persistState()
+    }
+
+    fun toggleAllRollers() {
+        _allRollersActive.value = !_allRollersActive.value
+        logEvent("All Rollers: ${if (_allRollersActive.value) "ON" else "OFF"}")
+        recomputeScores()
+        persistState()
+    }
+
+    fun toggleFireball() {
+        _isFireballActive.value = !_isFireballActive.value
+        logEvent("Fireball Mode: ${if (_isFireballActive.value) "ON" else "OFF"}")
+
+        // React: if sweet spot is on, bonus amount depends on fireball mode (±4 delta).
+        if (_sweetSpotBonusAwarded.value) {
+            val participant = _activeParticipant.value
+            if (participant != null) {
+                val delta = if (_isFireballActive.value) 4 else -4
+                _activeParticipant.value = participant.copy(
+                    sweetSpotBonus = (participant.sweetSpotBonus + delta).coerceAtLeast(0)
+                )
+            }
+        }
+
+        recomputeScores()
+        persistState()
+    }
+
+    fun toggleManualSweetSpot() {
+        logEvent("Sweet Spot toggled")
+        val participant = _activeParticipant.value
+
+        val turningOn = !_sweetSpotBonusAwarded.value
+        val bonus = if (_isFireballActive.value) 8 else 4
+
+        _sweetSpotBonusAwarded.value = turningOn
+
+        if (participant != null) {
+            _activeParticipant.value = if (turningOn) {
+                participant.copy(sweetSpotBonus = participant.sweetSpotBonus + bonus)
+            } else {
+                participant.copy(sweetSpotBonus = (participant.sweetSpotBonus - bonus).coerceAtLeast(0))
+            }
+        }
+
+        recomputeScores()
+        persistState()
+    }
+
+    fun toggleFieldOrientation() {
+        _isFieldFlipped.value = !_isFieldFlipped.value
+        persistState()
+    }
+
+    // ---- Next/Skip + JSON export ----
+
+    @Serializable
+    data class PendingJsonExport(
+        val filename: String,
+        val content: String
+    )
+
+    private val _pendingJsonExport = MutableStateFlow<PendingJsonExport?>(null)
+    val pendingJsonExport: StateFlow<PendingJsonExport?> = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
+
+    // Track timer metadata for export (React compatibility)
+    private val _currentTimerFileName = MutableStateFlow<String?>(null)
+
     fun nextParticipant() {
         val current = _activeParticipant.value
         val next = _participantsQueue.value.firstOrNull()
 
-        if (current == null && next == null) return
+        if (current == null && next == null) {
+            // Create a blank participant and move to it
+            _activeParticipant.value = FireballParticipant("", "", "")
+            _currentParticipantLog.value = emptyList()
+            clearBoardInternal()
+            recomputeScores()
+            persistState()
+            return
+        }
+
+        // IMPORTANT: finalize scoring snapshot BEFORE clearing the board.
+        val finalCurrent = current?.let { finalizeCurrentParticipantForCompletion(it) }
+
+        if (finalCurrent != null) {
+            // Persist finalized record so exports (which read model state) see real totals.
+            _activeParticipant.value = finalCurrent
+            _completedParticipants.value = _completedParticipants.value + finalCurrent
+
+            // Emit per-round JSON export (React structure)
+            val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+            val stamp = fireballTimestamp(now)
+            val safeHandler = finalCurrent.handler.replace("\\s+".toRegex(), "")
+            val safeDog = finalCurrent.dog.replace("\\s+".toRegex(), "")
+            val filename = "FireBall_${safeHandler}_${safeDog}_$stamp.json"
+
+            // Timer metadata for export
+            val timerFileName = _currentTimerFileName.value ?: "No Timer"
+            val timerNumber = Regex("(\\d+)").find(timerFileName)?.value ?: "No Timer"
+
+            val exportData = FireballRoundExport(
+                gameMode = "FireBall",
+                exportTimestamp = Clock.System.now().toString(),
+                participantData = FireballParticipantData(
+                    handler = finalCurrent.handler,
+                    dog = finalCurrent.dog,
+                    utn = finalCurrent.utn,
+                    completedAt = now.toString()
+                ),
+                roundResults = FireballRoundResults(
+                    nonFireballPoints = finalCurrent.nonFireballPoints,
+                    fireballPoints = finalCurrent.fireballPoints,
+                    totalPoints = finalCurrent.totalPoints,
+                    sweetSpotBonus = finalCurrent.sweetSpotBonus,
+                    highestZone = finalCurrent.highestZone,
+                    allRollers = finalCurrent.allRollers,
+                    timerNumber = timerNumber,
+                    timerFileName = timerFileName,
+                    clickedZones = _clickedZones.value.map { FireballGridPointDTO(it.row, it.col) },
+                    fireBallZones = _fireballZones.value.map { FireballGridPointDTO(it.row, it.col) }
+                ),
+                roundLog = _currentParticipantLog.value
+            )
+
+            _pendingJsonExport.value = PendingJsonExport(
+                filename = filename,
+                content = exportJson.encodeToString(exportData)
+            )
+
+            // Persist *before* we clear the board / advance.
+            persistState()
+        }
+
+        // Reset per-participant timer metadata for next team
+        _currentTimerFileName.value = "No Timer"
+
+        // Advance
+        _currentParticipantLog.value = emptyList()
 
         if (next == null) {
-            // Nothing to advance to
-            sidebarMessage.value = "No next participant"
+            _activeParticipant.value = FireballParticipant("", "", "")
+            clearBoardInternal()
+            recomputeScores()
             persistState()
             return
         }
@@ -265,11 +611,9 @@ class FireballScreenModel : ScreenModel {
     }
 
     fun skipParticipant() {
+        logEvent("Skip")
         val current = _activeParticipant.value ?: return
-        val next = _participantsQueue.value.firstOrNull()
-
-        if (next == null) {
-            // Only one participant; skipping does nothing
+        val next = _participantsQueue.value.firstOrNull() ?: run {
             sidebarMessage.value = "No one to skip to"
             persistState()
             return
@@ -277,60 +621,19 @@ class FireballScreenModel : ScreenModel {
 
         _participantsQueue.value = _participantsQueue.value.drop(1) + current
         _activeParticipant.value = next
+        _currentParticipantLog.value = emptyList()
 
         clearBoardInternal()
         recomputeScores()
         persistState()
     }
 
-    fun clearBoard() {
-        clearBoardInternal()
-        recomputeScores()
-        persistState()
-    }
-
-    private fun clearBoardInternal() {
-        _clickedZones.value = emptySet()
-        _fireballZones.value = emptySet()
-        _isFireballActive.value = false
-        _sweetSpotBonusAwarded.value = false
-    }
-
-    fun resetGame() {
-        // Reset scores for ALL participants
-        _activeParticipant.value = _activeParticipant.value?.copy(stats = FireballParticipantStats())
-        _participantsQueue.value = _participantsQueue.value.map { it.copy(stats = FireballParticipantStats()) }
-        clearBoardInternal()
-        recomputeScores()
-        sidebarMessage.value = "Game reset"
-        persistState()
-    }
-
-    fun toggleAllRollers() {
-        _allRollersActive.value = !_allRollersActive.value
-        // allRollers affects scoring only at export/participant level; keep persisted
-        persistState()
-    }
-
-    fun toggleFireball() {
-        _isFireballActive.value = !_isFireballActive.value
-        persistState()
-    }
-
-    fun toggleManualSweetSpot() {
-        _sweetSpotBonusAwarded.value = !_sweetSpotBonusAwarded.value
-        recomputeScores()
-        persistState()
-    }
-
-    fun toggleFieldOrientation() {
-        _isFieldFlipped.value = !_isFieldFlipped.value
-        persistState()
-    }
-
-    // --- Timer ---
+    // ---- timer ----
 
     fun startRoundTimer(durationSeconds: Int = TIMER_DEFAULT_SECONDS) {
+        // Pick a timer label deterministically for now. If you later add random sound timers,
+        // set _currentTimerFileName accordingly.
+        _currentTimerFileName.value = "No Timer"
         timerJob?.cancel()
         _timerSecondsRemaining.value = durationSeconds
         _isTimerRunning.value = true
@@ -350,6 +653,7 @@ class FireballScreenModel : ScreenModel {
     }
 
     fun stopRoundTimer() {
+        // Keep whatever timer was used for this participant; if none, stay "No Timer".
         _isTimerRunning.value = false
         timerJob?.cancel()
         timerJob = null
@@ -357,78 +661,22 @@ class FireballScreenModel : ScreenModel {
     }
 
     fun resetRoundTimer() {
+        _currentTimerFileName.value = "No Timer"
         stopRoundTimer()
     }
 
     fun openHelp() {
-        sidebarMessage.value = "Tap a zone to score. Fireball Mode: second-tap a green zone to make it Fireball (double points). Sweet Spot Bonus adds +4 (or +8 if Fireball active)."
+        sidebarMessage.value = "Tap a zone to score. Fireball Mode: tap a zone to make it Fireball (double points); tap again to clear while Fireball Mode is active. Sweet Spot adds +4 (or +8 if Fireball Mode is active)."
         persistState()
     }
 
-    // --- Scoring ---
-
-    private data class BoardBreakdown(
-        val nonFireballPoints: Int,
-        val fireballPoints: Int,
-        val sweetSpotBonus: Int,
-        val totalPoints: Int,
-        val highestZone: Int?
-    )
-
-    private fun computeBoardBreakdown(): BoardBreakdown {
-        var nonFire = 0
-        var fire = 0
-        var highest: Int? = null
-
-        val clicked = _clickedZones.value
-        val fireballs = _fireballZones.value
-
-        clicked.forEach { p ->
-            val value = zoneValue(p.row, p.col) ?: return@forEach
-            if (p in fireballs) {
-                fire += value * 2
-            } else {
-                nonFire += value
-            }
-            highest = maxOf(highest ?: 0, value)
-        }
-
-        val sweetSpotBonus = if (_sweetSpotBonusAwarded.value) {
-            if (_isFireballActive.value) 8 else 4
-        } else 0
-
-        val total = nonFire + fire + sweetSpotBonus
-
-        return BoardBreakdown(
-            nonFireballPoints = nonFire,
-            fireballPoints = fire,
-            sweetSpotBonus = sweetSpotBonus,
-            totalPoints = total,
-            highestZone = highest
-        )
-    }
-
-    private fun recomputeScores(latestClickedValue: Int? = null) {
-        val participant = _activeParticipant.value
-        val board = computeBoardBreakdown()
-
-        _currentBoardScore.value = board.totalPoints
-
-        val already = participant?.stats?.totalPoints ?: 0
-        _totalScore.value = already + board.totalPoints
-
-        // optionally provide a small UI message
-        if (latestClickedValue != null) {
-            sidebarMessage.value = "+$latestClickedValue" + if (_isFireballActive.value) " (fireball mode)" else ""
-        }
-    }
-
-    // --- Export ---
+    // ---- Export helpers ----
 
     suspend fun exportAsJson(): String {
         val state = FireballExportSnapshot(
             activeParticipant = _activeParticipant.value,
             queue = _participantsQueue.value,
+            completed = _completedParticipants.value,
             allRollers = _allRollersActive.value
         )
         return json.encodeToString(state)
@@ -446,15 +694,13 @@ data class FireballParticipant(
     val handler: String,
     val dog: String,
     val utn: String,
-    val stats: FireballParticipantStats = FireballParticipantStats()
-)
+    val heightDivision: String = "",
 
-@Serializable
-data class FireballParticipantStats(
+    // React-style persisted totals
     val nonFireballPoints: Int = 0,
     val fireballPoints: Int = 0,
-    val sweetSpotBonus: Int = 0,
     val totalPoints: Int = 0,
+    val sweetSpotBonus: Int = 0,
     val highestZone: Int? = null,
     val allRollers: Boolean = false,
     val completedBoards: Int = 0,
@@ -462,9 +708,42 @@ data class FireballParticipantStats(
 )
 
 @Serializable
+private data class FireballRoundResults(
+    val nonFireballPoints: Int,
+    val fireballPoints: Int,
+    val totalPoints: Int,
+    val sweetSpotBonus: Int,
+    val highestZone: Int?,
+    val allRollers: Boolean,
+    val timerNumber: String,
+    val timerFileName: String,
+    val clickedZones: List<FireballGridPointDTO>,
+    val fireBallZones: List<FireballGridPointDTO>
+)
+
+@Serializable
+private data class FireballParticipantData(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val completedAt: String
+)
+
+@Serializable
+private data class FireballRoundExport(
+    val gameMode: String,
+    val exportTimestamp: String,
+    val participantData: FireballParticipantData,
+    val roundResults: FireballRoundResults,
+    val roundLog: List<String> = emptyList()
+)
+
+@Serializable
 data class FireballPersistedState(
     val activeParticipant: FireballParticipant? = null,
     val queue: List<FireballParticipant> = emptyList(),
+    val completed: List<FireballParticipant> = emptyList(),
+    val currentParticipantLog: List<String> = emptyList(),
     val clickedZones: List<FireballGridPointDTO> = emptyList(),
     val fireballZones: List<FireballGridPointDTO> = emptyList(),
     val isFireballActive: Boolean = false,
@@ -479,5 +758,19 @@ data class FireballPersistedState(
 data class FireballExportSnapshot(
     val activeParticipant: FireballParticipant?,
     val queue: List<FireballParticipant>,
+    val completed: List<FireballParticipant>,
     val allRollers: Boolean
 )
+
+private fun fireballTimestamp(now: kotlinx.datetime.LocalDateTime): String {
+    fun pad2(n: Int) = n.toString().padStart(2, '0')
+    return buildString {
+        append(now.year)
+        append(pad2(now.monthNumber))
+        append(pad2(now.dayOfMonth))
+        append('_')
+        append(pad2(now.hour))
+        append(pad2(now.minute))
+        append(pad2(now.second))
+    }
+}
