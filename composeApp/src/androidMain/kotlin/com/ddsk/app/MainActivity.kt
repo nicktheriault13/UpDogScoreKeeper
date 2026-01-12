@@ -14,6 +14,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Deprecated("Deprecated in Android framework; kept for ActivityResultBus compatibility")
+    @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         ActivityResultBus.dispatch(requestCode, resultCode, data)

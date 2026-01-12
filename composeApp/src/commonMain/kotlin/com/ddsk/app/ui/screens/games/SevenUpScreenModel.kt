@@ -7,11 +7,15 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -22,7 +26,14 @@ import kotlin.time.TimeSource
 data class SevenUpParticipant(
     val handler: String,
     val dog: String,
-    val utn: String
+    val utn: String,
+    // scoring/export fields (optional)
+    val jumpSum: Int = 0,
+    val nonJumpSum: Int = 0,
+    val timeRemaining: Float = 60.0f,
+    val sweetSpotBonus: Boolean = false,
+    val allRollers: Boolean = false,
+    val heightDivision: String = ""
 )
 
 @Serializable
@@ -42,10 +53,16 @@ data class SevenUpUiState(
     val isTimerRunning: Boolean = false,
     val activeParticipant: SevenUpParticipant? = null,
     val queue: List<SevenUpParticipant> = emptyList(),
-    val completed: List<SevenUpParticipant> = emptyList() // Needs more robust result structure if stats needed on completed
+    val completed: List<SevenUpParticipant> = emptyList(),
+    // Per-participant logs, keyed by "handler-dog" (persisted)
+    val participantLogs: Map<String, List<String>> = emptyMap(),
+    // Current round log entries (persisted so Next export matches what user saw)
+    val currentRoundLog: List<String> = emptyList(),
 )
 
 class SevenUpScreenModel : ScreenModel {
+
+    enum class ImportMode { Add, ReplaceAll }
 
     // Replacing separate flows with centralized UI state flow for persistence consistency
     private val _uiState = MutableStateFlow(SevenUpUiState())
@@ -71,6 +88,292 @@ class SevenUpScreenModel : ScreenModel {
     // New flows for participants
     val participants = _uiState.map { it.queue }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyList())
     val activeParticipant = _uiState.map { it.activeParticipant }.stateIn(screenModelScope, SharingStarted.Eagerly, null)
+
+    private val _pendingJsonExport = MutableStateFlow<SevenUpPendingJsonExport?>(null)
+    val pendingJsonExport: StateFlow<SevenUpPendingJsonExport?> = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
+
+    private val exportJson = Json {
+        prettyPrint = true
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
+
+    /** Public helper for export filenames (kept consistent with other games). */
+    fun exportStampForFilename(now: kotlinx.datetime.LocalDateTime): String = exportStamp(now)
+
+    private fun exportStamp(now: kotlinx.datetime.LocalDateTime): String {
+        fun pad2(n: Int) = n.toString().padStart(2, '0')
+        return buildString {
+            append(now.year)
+            append(pad2(now.monthNumber))
+            append(pad2(now.dayOfMonth))
+            append('_')
+            append(pad2(now.hour))
+            append(pad2(now.minute))
+            append(pad2(now.second))
+        }
+    }
+
+    private fun participantKey(p: SevenUpParticipant): String = "${p.handler}-${p.dog}"
+
+    fun logEvent(message: String) {
+        val ts = Clock.System.now().toString()
+        val active = _uiState.value.activeParticipant
+        val key = active?.let { participantKey(it) }
+        val line = "$ts: $message"
+
+        _uiState.update { s ->
+            val updatedRound = (s.currentRoundLog + line).takeLast(300)
+            val updatedParticipantLogs = if (key == null) {
+                s.participantLogs
+            } else {
+                val existing = s.participantLogs[key].orEmpty()
+                s.participantLogs + (key to (existing + line).takeLast(2000))
+            }
+
+            s.copy(
+                currentRoundLog = updatedRound,
+                participantLogs = updatedParticipantLogs
+            )
+        }
+        persistState()
+    }
+
+    private fun resetRoundStateOnly() {
+        _uiState.update {
+            it.copy(
+                score = 0,
+                jumpCounts = emptyMap(),
+                disabledJumps = emptySet(),
+                jumpStreak = 0,
+                markedCells = emptyMap(),
+                nonJumpMark = 1,
+                lastWasNonJump = false,
+                sweetSpotBonus = false,
+                hasStarted = false,
+                timeRemaining = 60.0f,
+                isTimerRunning = false,
+                currentRoundLog = emptyList(),
+            )
+        }
+    }
+
+    private val _allRollers = MutableStateFlow(false)
+    val allRollers = _allRollers.asStateFlow()
+
+    fun setAllRollers(enabled: Boolean) {
+        _allRollers.value = enabled
+        persistState()
+    }
+
+    fun toggleAllRollersFlag() {
+        setAllRollers(!_allRollers.value)
+    }
+
+    fun previousParticipant() {
+        val state = _uiState.value
+        val active = state.activeParticipant
+        val queue = state.queue
+        if (active == null && queue.isEmpty()) return
+
+        // React behavior: move last team to front of queue
+        val combined = buildList {
+            active?.let { add(it) }
+            addAll(queue)
+        }
+        if (combined.size <= 1) return
+
+        val last = combined.last()
+        val rotated = listOf(last) + combined.dropLast(1)
+
+        _uiState.update {
+            it.copy(
+                activeParticipant = rotated.firstOrNull(),
+                queue = rotated.drop(1)
+            )
+        }
+        resetRoundStateOnly()
+        _allRollers.value = false
+        logEvent("Previous: Now active - ${last.handler} & ${last.dog}")
+        persistState()
+    }
+
+    fun skipParticipant() {
+        val state = _uiState.value
+        val active = state.activeParticipant ?: return
+        val queue = state.queue
+
+        // React behavior: move current team to end without scoring
+        val rotated = queue + active
+        val newActive = rotated.firstOrNull()
+
+        _uiState.update {
+            it.copy(
+                activeParticipant = newActive,
+                queue = rotated.drop(1)
+            )
+        }
+        resetRoundStateOnly()
+        _allRollers.value = false
+        logEvent("Skip: Skipped ${active.handler} & ${active.dog}")
+        persistState()
+    }
+
+    fun nextParticipant() {
+        val state = _uiState.value
+        val active = state.activeParticipant
+
+        if (active == null && state.queue.isEmpty()) return
+
+        if (active != null) {
+            val jumpSum = state.jumpCounts.values.sum()
+            val nonJumpSum = state.markedCells.size
+
+            val completedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+
+            val result = SevenUpRoundResult(
+                finalScore = state.score,
+                timeRemaining = state.timeRemaining,
+                jumpSum = jumpSum,
+                nonJumpSum = nonJumpSum,
+                sweetSpotBonus = state.sweetSpotBonus,
+                allRollers = _allRollers.value,
+                completedAt = completedAt.toString(),
+                heightDivision = active.heightDivision
+            )
+
+            // JSON export emit (match React structure; include log)
+            runCatching {
+                val stamp = exportStamp(completedAt)
+                val safeHandler = active.handler.replace("\\s+".toRegex(), "")
+                val safeDog = active.dog.replace("\\s+".toRegex(), "")
+                val filename = "7Up_${safeHandler}_${safeDog}_$stamp.json"
+
+                val export = SevenUpRoundExport(
+                    gameMode = "7-Up",
+                    exportTimestamp = Clock.System.now().toString(),
+                    participantData = SevenUpParticipantData(
+                        handler = active.handler,
+                        dog = active.dog,
+                        utn = active.utn,
+                        completedAt = completedAt.toString()
+                    ),
+                    roundResults = result,
+                    logEntries = state.participantLogs[participantKey(active)].orEmpty()
+                )
+
+                _pendingJsonExport.value = SevenUpPendingJsonExport(filename, exportJson.encodeToString(export))
+            }
+
+            // Persist completed participant with baked-in export fields
+            _uiState.update { s ->
+                val completedParticipant = SevenUpParticipant(
+                    handler = active.handler,
+                    dog = active.dog,
+                    utn = active.utn,
+                    jumpSum = jumpSum,
+                    nonJumpSum = nonJumpSum,
+                    timeRemaining = state.timeRemaining,
+                    sweetSpotBonus = state.sweetSpotBonus,
+                    allRollers = _allRollers.value,
+                    heightDivision = active.heightDivision
+                )
+                s.copy(
+                    completed = s.completed + completedParticipant,
+                    activeParticipant = s.queue.firstOrNull() ?: SevenUpParticipant("", "", ""),
+                    queue = if (s.queue.isEmpty()) emptyList() else s.queue.drop(1)
+                )
+            }
+        }
+
+        // reset round state and all-rollers for next competitor
+        resetRoundStateOnly()
+        _allRollers.value = false
+        logEvent("Next")
+        persistState()
+    }
+
+    /**
+     * Export snapshot used for XLSM export: completed + active(with current round state applied) + queue.
+     */
+    fun exportSnapshot(): List<SevenUpParticipant> {
+        val state = _uiState.value
+        val active = state.activeParticipant
+        val jumpSum = state.jumpCounts.values.sum()
+        val nonJumpSum = state.markedCells.size
+
+        val activeExport = active?.takeIf { it.handler.isNotBlank() || it.dog.isNotBlank() }?.copy(
+            jumpSum = jumpSum,
+            nonJumpSum = nonJumpSum,
+            timeRemaining = state.timeRemaining,
+            sweetSpotBonus = state.sweetSpotBonus,
+            allRollers = _allRollers.value
+        )
+
+        return buildList {
+            addAll(state.completed)
+            if (activeExport != null) add(activeExport)
+            addAll(state.queue)
+        }
+    }
+
+    fun exportScoresXlsm(templateBytes: ByteArray): ByteArray {
+        return generateSevenUpXlsm(exportSnapshot(), templateBytes)
+    }
+
+    fun importParticipantsFromCsv(csvText: String, mode: ImportMode) {
+        val imported = parseCsv(csvText)
+        val players = imported.map { SevenUpParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players, mode)
+    }
+
+    fun importParticipantsFromXlsx(xlsxData: ByteArray, mode: ImportMode) {
+        val imported = parseXlsx(xlsxData)
+        val players = imported.map { SevenUpParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players, mode)
+    }
+
+    private fun applyImportedPlayers(players: List<SevenUpParticipant>, mode: ImportMode) {
+        if (players.isEmpty()) return
+        _uiState.update { state ->
+            val existing = buildList {
+                state.activeParticipant?.let { add(it) }
+                addAll(state.queue)
+            }
+
+            val merged = when (mode) {
+                ImportMode.ReplaceAll -> players
+                ImportMode.Add -> existing + players
+            }
+
+            val newActive = merged.firstOrNull() ?: SevenUpParticipant("", "", "")
+            state.copy(
+                activeParticipant = newActive,
+                queue = merged.drop(1),
+                completed = emptyList()
+            )
+        }
+        resetRoundStateOnly()
+        _allRollers.value = false
+        persistState()
+    }
+
+    fun clearParticipants() {
+        _uiState.update {
+            it.copy(
+                activeParticipant = null,
+                queue = emptyList(),
+                completed = emptyList(),
+                participantLogs = emptyMap(),
+                currentRoundLog = emptyList()
+            )
+        }
+        persistState()
+    }
 
     private var timerJob: Job? = null
     private var dataStore: DataStore? = null
@@ -189,29 +492,40 @@ class SevenUpScreenModel : ScreenModel {
     fun reset() {
         _uiState.value = SevenUpUiState() // Reset to default state
         timerJob?.cancel()
+        _allRollers.value = false
         persistState()
     }
-
-    fun importParticipantsFromCsv(csvText: String) {
-        val imported = parseCsv(csvText)
-        val players = imported.map { SevenUpParticipant(it.handler, it.dog, it.utn) }
-        applyImportedPlayers(players)
-    }
-
-    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
-        val imported = parseXlsx(xlsxData)
-        val players = imported.map { SevenUpParticipant(it.handler, it.dog, it.utn) }
-        applyImportedPlayers(players)
-    }
-
-    private fun applyImportedPlayers(players: List<SevenUpParticipant>) {
-        if (players.isEmpty()) return
-        _uiState.update { state ->
-            state.copy(
-                queue = players.drop(1),
-                activeParticipant = players.first()
-            )
-        }
-        reset()
-    }
 }
+
+@kotlinx.serialization.Serializable
+private data class SevenUpRoundResult(
+    val finalScore: Int,
+    val timeRemaining: Float,
+    val jumpSum: Int,
+    val nonJumpSum: Int,
+    val sweetSpotBonus: Boolean,
+    val allRollers: Boolean,
+    val completedAt: String,
+    val heightDivision: String = ""
+)
+
+@kotlinx.serialization.Serializable
+data class SevenUpPendingJsonExport(val filename: String, val content: String)
+
+@kotlinx.serialization.Serializable
+private data class SevenUpParticipantData(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val completedAt: String
+)
+
+@kotlinx.serialization.Serializable
+private data class SevenUpRoundExport(
+    val gameMode: String,
+    val exportTimestamp: String,
+    val participantData: SevenUpParticipantData,
+    val roundResults: SevenUpRoundResult,
+    // Per-participant log (React: logEntries)
+    val logEntries: List<String> = emptyList()
+)

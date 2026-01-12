@@ -13,6 +13,10 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 class GreedyScreenModel : ScreenModel {
 
@@ -188,6 +192,17 @@ class GreedyScreenModel : ScreenModel {
         _allRollersEnabled.value = snapshot.allRollersEnabled
     }
 
+    private val _currentParticipantLog = MutableStateFlow<List<String>>(emptyList())
+    val currentParticipantLog: StateFlow<List<String>> = _currentParticipantLog.asStateFlow()
+
+    private fun logEvent(message: String) {
+        val participant = _participants.value.firstOrNull()
+        val who = participant?.handler?.takeIf { it.isNotBlank() } ?: "Unknown"
+        val entry = "${Clock.System.now()}: $message"
+        _currentParticipantLog.value = _currentParticipantLog.value + entry
+        // keep existing global log behavior if any
+    }
+
     fun handleButtonPress(button: String) {
         if (button in _activeButtons.value) return
 
@@ -208,6 +223,7 @@ class GreedyScreenModel : ScreenModel {
                 calculateFinalScore()
             }
         }
+        logEvent("Button pressed: $button")
     }
 
     fun nextThrowZone(clockwise: Boolean) {
@@ -232,30 +248,67 @@ class GreedyScreenModel : ScreenModel {
             val nextZoneButtons = _activeButtonsByZone.value.getOrElse(nextZone) { emptySet() }
             _activeButtons.value = nextZoneButtons
         }
+        logEvent(if (clockwise) "Next ThrowZone (clockwise)" else "Next ThrowZone (counterclockwise)")
     }
 
     fun rotateStartingZone() {
         pushUndo()
         _rotationDegrees.value += 90
+        logEvent("Rotate Starting Zone")
+    }
+
+    enum class ImportMode { Add, ReplaceAll }
+
+    fun importParticipantsFromCsv(csv: String, mode: ImportMode = ImportMode.Add) {
+        val imported = parseCsv(csv)
+        val newParticipants = imported.map {
+            GreedyParticipant(
+                handler = it.handler,
+                dog = it.dog,
+                utn = it.utn,
+                heightDivision = it.heightDivision
+            )
+        }
+        _participants.value = when (mode) {
+            ImportMode.Add -> _participants.value + newParticipants
+            ImportMode.ReplaceAll -> newParticipants
+        }
+        if (mode == ImportMode.ReplaceAll) {
+            _completedParticipants.value = emptyList()
+        }
+        persistState()
+    }
+
+    fun importParticipantsFromXlsx(xlsx: ByteArray, mode: ImportMode = ImportMode.Add) {
+        val imported = parseXlsx(xlsx)
+        val newParticipants = imported.map {
+            GreedyParticipant(
+                handler = it.handler,
+                dog = it.dog,
+                utn = it.utn,
+                heightDivision = it.heightDivision
+            )
+        }
+        _participants.value = when (mode) {
+            ImportMode.Add -> _participants.value + newParticipants
+            ImportMode.ReplaceAll -> newParticipants
+        }
+        if (mode == ImportMode.ReplaceAll) {
+            _completedParticipants.value = emptyList()
+        }
+        persistState()
     }
 
     fun setSweetSpotBonus(bonus: Int) {
         pushUndo()
         if (bonus in 1..8) {
-            val actualBonus = if(bonus == 8) 10 else bonus
-            _sweetSpotBonus.value = actualBonus
-            _score.update { it + actualBonus }
+            // React behavior: bonus value is entered once; if it's 8, add 2 more.
+            val normalizedBonus = if (bonus == 8) 10 else bonus
+            _sweetSpotBonus.value = normalizedBonus
+            // avoid double-adding if user re-submits via UI safeguards
+            calculateFinalScore()
         }
-    }
-
-    fun incrementMisses() {
-        pushUndo()
-        _misses.value++
-    }
-
-    fun toggleAllRollers() {
-        pushUndo()
-        _allRollersEnabled.update { !it }
+        logEvent("Sweet Spot Bonus set: $bonus")
     }
 
     private fun calculateFinalScore() {
@@ -268,21 +321,67 @@ class GreedyScreenModel : ScreenModel {
                 4 -> 2
                 else -> 0
             }
-            // Score is based on the number of unique buttons clicked in each zone
-            // filtered for actual scoring buttons (X, Y, Z, Sweet Spot)
-            val scoringButtons = _activeButtonsByZone.value[zone].filter { it in listOf("X", "Y", "Z", "Sweet Spot") }
-            totalScore += scoringButtons.size * zonePoints
+            val scoringButtons = _activeButtonsByZone.value[zone].count { it in listOf("X", "Y", "Z", "Sweet Spot") }
+            totalScore += scoringButtons * zonePoints
         }
         totalScore += _sweetSpotBonus.value
         _score.value = totalScore
     }
 
-    fun addParticipant(handler: String, dog: String, utn: String) {
-        val participant = GreedyParticipant(handler, dog, utn)
-        _participants.update {
-            if (it.isEmpty()) listOf(participant) else it + participant
+    @Serializable
+    data class PendingJsonExport(val filename: String, val content: String)
+
+    @Serializable
+    data class GreedyRoundResults(
+        val zone1_catches: Int,
+        val zone2_catches: Int,
+        val zone3_catches: Int,
+        val zone4_catches: Int,
+        val finish_on_sweet_spot: Boolean,
+        val sweet_spot_bonus: Int,
+        val number_of_misses: Int,
+        val all_rollers: Boolean,
+        val score: Int,
+        val activeButtonsByZone: List<List<String>>
+    )
+
+    @Serializable
+    data class GreedyParticipantData(
+        val handler: String,
+        val dog: String,
+        val utn: String,
+        val completedAt: String
+    )
+
+    @Serializable
+    data class GreedyRoundExport(
+        val gameMode: String,
+        val exportTimestamp: String,
+        val participantData: GreedyParticipantData,
+        val roundResults: GreedyRoundResults,
+        val roundLog: List<String> = emptyList()
+    )
+
+    private val exportJson = Json { prettyPrint = true; encodeDefaults = true }
+
+    private val _pendingJsonExport = MutableStateFlow<PendingJsonExport?>(null)
+    val pendingJsonExport: StateFlow<PendingJsonExport?> = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
+
+    private fun exportStamp(dt: kotlinx.datetime.LocalDateTime): String {
+        fun pad2(n: Int) = n.toString().padStart(2, '0')
+        return buildString {
+            append(dt.year)
+            append(pad2(dt.monthNumber))
+            append(pad2(dt.dayOfMonth))
+            append('_')
+            append(pad2(dt.hour))
+            append(pad2(dt.minute))
+            append(pad2(dt.second))
         }
-        persistState()
     }
 
     fun nextParticipant() {
@@ -296,7 +395,6 @@ class GreedyScreenModel : ScreenModel {
                 currentRoundUndoStack.clear()
             }
 
-            // Calculate score for current participant
             // Ensure we use index 0 as current
             val currentParticipant = _participants.value[0]
             val updatedStats = currentParticipant.copy(
@@ -311,11 +409,50 @@ class GreedyScreenModel : ScreenModel {
                 score = _score.value
             )
 
+            runCatching {
+                val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                val stamp = exportStamp(now)
+                val safeHandler = updatedStats.handler.replace("\\s+".toRegex(), "")
+                val safeDog = updatedStats.dog.replace("\\s+".toRegex(), "")
+                val filename = "Greedy_${safeHandler}_${safeDog}_$stamp.json"
+
+                val exportData = GreedyRoundExport(
+                    gameMode = "Greedy",
+                    exportTimestamp = Clock.System.now().toString(),
+                    participantData = GreedyParticipantData(
+                        handler = updatedStats.handler,
+                        dog = updatedStats.dog,
+                        utn = updatedStats.utn,
+                        completedAt = now.toString()
+                    ),
+                    roundResults = GreedyRoundResults(
+                        zone1_catches = updatedStats.zone1Catches,
+                        zone2_catches = updatedStats.zone2Catches,
+                        zone3_catches = updatedStats.zone3Catches,
+                        zone4_catches = updatedStats.zone4Catches,
+                        finish_on_sweet_spot = updatedStats.finishOnSweetSpot,
+                        sweet_spot_bonus = updatedStats.sweetSpotBonus,
+                        number_of_misses = updatedStats.numberOfMisses,
+                        all_rollers = updatedStats.allRollers,
+                        score = updatedStats.score,
+                        activeButtonsByZone = _activeButtonsByZone.value.map { set -> set.toList() }
+                    ),
+                    roundLog = _currentParticipantLog.value
+                )
+
+                _pendingJsonExport.value = PendingJsonExport(
+                    filename = filename,
+                    content = exportJson.encodeToString(exportData)
+                )
+            }
+
             // Move to completed
             _completedParticipants.update { it + updatedStats }
 
             // Remove from active queue
             _participants.update { it.drop(1) }
+
+            // Reset state for next round and clear participant log
             reset()
             persistState()
         }
@@ -376,20 +513,7 @@ class GreedyScreenModel : ScreenModel {
         _isRotateStartingZoneVisible.value = true
         _allRollersEnabled.value = false
         currentRoundUndoStack.clear()
-    }
-
-    fun importParticipantsFromCsv(csv: String) {
-        val imported = parseCsv(csv)
-        val newParticipants = imported.map { GreedyParticipant(it.handler, it.dog, it.utn) }
-        _participants.value = _participants.value + newParticipants // Append
-        persistState()
-    }
-
-    fun importParticipantsFromXlsx(xlsx: ByteArray) {
-        val imported = parseXlsx(xlsx)
-        val newParticipants = imported.map { GreedyParticipant(it.handler, it.dog, it.utn) }
-        _participants.value = _participants.value + newParticipants
-        persistState()
+        _currentParticipantLog.value = emptyList()
     }
 
     fun exportParticipantsAsXlsx(templateBytes: ByteArray): ByteArray {
@@ -406,5 +530,25 @@ class GreedyScreenModel : ScreenModel {
             "${p.handler},${p.dog},${p.utn},${p.zone1Catches},${p.zone2Catches},${p.zone3Catches},${p.zone4Catches},${if(p.finishOnSweetSpot) "Y" else "N"},${p.sweetSpotBonus},${p.numberOfMisses},${if(p.allRollers) "Y" else "N"},${p.score}"
         }
         return (listOf(header) + rows).joinToString("\n")
+    }
+
+    fun addParticipant(handler: String, dog: String, utn: String, heightDivision: String = "") {
+        val participant = GreedyParticipant(handler = handler, dog = dog, utn = utn, heightDivision = heightDivision)
+        _participants.update {
+            if (it.isEmpty()) listOf(participant) else it + participant
+        }
+        persistState()
+    }
+
+    fun incrementMisses() {
+        pushUndo()
+        _misses.value = _misses.value + 1
+        logEvent("Miss+")
+    }
+
+    fun toggleAllRollers() {
+        pushUndo()
+        _allRollersEnabled.update { !it }
+        logEvent(if (_allRollersEnabled.value) "All Rollers enabled" else "All Rollers disabled")
     }
 }

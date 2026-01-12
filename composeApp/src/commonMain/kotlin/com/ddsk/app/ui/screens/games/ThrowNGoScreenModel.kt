@@ -13,6 +13,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.collections.ArrayDeque
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 private const val MAX_UNDO_LEVELS = 250
 private const val DEFAULT_TIMER_SECONDS = 60
@@ -43,6 +46,7 @@ data class ThrowNGoParticipant(
     val handler: String,
     val dog: String,
     val utn: String,
+    val heightDivision: String = "",
     val results: ThrowNGoRoundStats? = null
 ) {
     val displayName: String get() = buildString { // Changed to property getter to avoid serialization issues
@@ -73,6 +77,34 @@ data class ThrowNGoUiState(
     val completed: List<ThrowNGoParticipant> = emptyList(),
     val fieldFlipped: Boolean = false,
     val logEntries: List<String> = emptyList()
+)
+
+@Serializable
+private data class ThrowNGoParticipantData(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val completedAt: String
+)
+
+@Serializable
+private data class ThrowNGoRoundResults(
+    val catches: Int,
+    val bonusCatches: Int,
+    val misses: Int,
+    val ob: Int,
+    val score: Int,
+    val sweetSpot: Boolean,
+    val allRollers: Boolean
+)
+
+@Serializable
+private data class ThrowNGoRoundExport(
+    val gameMode: String,
+    val exportTimestamp: String,
+    val participantData: ThrowNGoParticipantData,
+    val roundResults: ThrowNGoRoundResults,
+    val roundLog: List<String> = emptyList()
 )
 
 class ThrowNGoScreenModel : ScreenModel {
@@ -227,7 +259,8 @@ class ThrowNGoScreenModel : ScreenModel {
     fun addParticipant(handler: String, dog: String, utn: String) {
         if (handler.isBlank() && dog.isBlank()) return
         snapshotState()
-        val participant = ThrowNGoParticipant(handler = handler.trim(), dog = dog.trim(), utn = utn.trim())
+        val participant = ThrowNGoParticipant(handler = handler.trim(), dog = dog.trim(), utn = utn.trim(), heightDivision = "")
+
         _uiState.update { state ->
             if (state.activeParticipant == null) {
                 state.copy(activeParticipant = participant)
@@ -238,35 +271,161 @@ class ThrowNGoScreenModel : ScreenModel {
         persistState()
     }
 
+    /**
+     * Snapshot of participants with the active team's current round state applied.
+     * This is what exports should read.
+     */
+    fun exportSnapshot(): List<ThrowNGoParticipant> {
+        val state = _uiState.value
+        val active = state.activeParticipant
+        val activeWithResults = active?.copy(results = ThrowNGoRoundStats(state.scoreState))
+        return buildList {
+            if (activeWithResults != null) add(activeWithResults)
+            addAll(state.queue)
+            addAll(state.completed)
+        }
+    }
+
+    fun exportScoresXlsx(templateBytes: ByteArray): ByteArray {
+        return generateThrowNGoXlsx(exportSnapshot(), templateBytes)
+    }
+
+    private val exportJson = Json {
+        prettyPrint = true
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
+
+    private fun exportStamp(now: kotlinx.datetime.LocalDateTime): String {
+        fun pad2(n: Int) = n.toString().padStart(2, '0')
+        return buildString {
+            append(now.year)
+            append(pad2(now.monthNumber))
+            append(pad2(now.dayOfMonth))
+            append('_')
+            append(pad2(now.hour))
+            append(pad2(now.minute))
+            append(pad2(now.second))
+        }
+    }
+
     fun nextParticipant() {
         snapshotState()
-        _uiState.update { state ->
-            val active = state.activeParticipant ?: return@update state
-            val completedParticipant = active.copy(results = ThrowNGoRoundStats(state.scoreState))
-            val next = state.queue.firstOrNull()
-            val remaining = if (state.queue.isEmpty()) emptyList() else state.queue.drop(1)
-            state.copy(
-                completed = state.completed + completedParticipant,
-                activeParticipant = next,
-                queue = remaining,
-                scoreState = ThrowNGoScoreState(),
-                logEntries = state.logEntries + logLine("Saved result for ${active.displayName}")
+
+        val currentState = _uiState.value
+        val active = currentState.activeParticipant
+
+        if (active == null && currentState.queue.isEmpty()) {
+            // Create a blank participant and move to it
+            _uiState.update { it.copy(activeParticipant = ThrowNGoParticipant("", "", ""), scoreState = ThrowNGoScoreState()) }
+            persistState()
+            return
+        }
+
+        // Finalize result BEFORE advancing/resetting
+        val finalized = active?.copy(results = ThrowNGoRoundStats(currentState.scoreState))
+
+        if (finalized != null) {
+            // Emit per-round JSON export prompt
+            val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+            val stamp = exportStamp(now)
+            val safeHandler = finalized.handler.replace("\\s+".toRegex(), "")
+            val safeDog = finalized.dog.replace("\\s+".toRegex(), "")
+            val filename = "ThrowNGo_${safeHandler}_${safeDog}_$stamp.json"
+
+            val exportData = ThrowNGoRoundExport(
+                gameMode = "ThrowNGo",
+                exportTimestamp = Clock.System.now().toString(),
+                participantData = ThrowNGoParticipantData(
+                    handler = finalized.handler,
+                    dog = finalized.dog,
+                    utn = finalized.utn,
+                    completedAt = now.toString()
+                ),
+                roundResults = ThrowNGoRoundResults(
+                    catches = finalized.results?.catches ?: 0,
+                    bonusCatches = finalized.results?.bonusCatches ?: 0,
+                    misses = finalized.results?.misses ?: 0,
+                    ob = finalized.results?.ob ?: 0,
+                    score = finalized.results?.score ?: 0,
+                    sweetSpot = finalized.results?.sweetSpot ?: false,
+                    allRollers = finalized.results?.allRollers ?: false
+                ),
+                roundLog = currentState.logEntries
+            )
+
+            _pendingJsonExport.value = PendingJsonExport(
+                filename = filename,
+                content = exportJson.encodeToString(exportData)
             )
         }
+
+        _uiState.update { state ->
+            val activeNow = state.activeParticipant
+            if (activeNow == null) return@update state
+
+            val completedParticipant = activeNow.copy(results = ThrowNGoRoundStats(state.scoreState))
+            val next = state.queue.firstOrNull()
+            val remaining = if (state.queue.isEmpty()) emptyList() else state.queue.drop(1)
+
+            state.copy(
+                completed = state.completed + completedParticipant,
+                activeParticipant = next ?: ThrowNGoParticipant("", "", ""),
+                queue = remaining,
+                scoreState = ThrowNGoScoreState(),
+                logEntries = state.logEntries + logLine("Saved result for ${activeNow.displayName}")
+            )
+        }
+
         persistState()
+    }
+
+    private val _pendingJsonExport = MutableStateFlow<PendingJsonExport?>(null)
+    val pendingJsonExport = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
+
+    fun startTimer() {
+        if (_timerRunning.value) return
+        _timerRunning.value = true
+        _timeLeft.value = DEFAULT_TIMER_SECONDS
+        timerJob?.cancel()
+        timerJob = screenModelScope.launch {
+            while (_timerRunning.value && _timeLeft.value > 0) {
+                delay(1000)
+                _timeLeft.value = (_timeLeft.value - 1).coerceAtLeast(0)
+            }
+            _timerRunning.value = false
+        }
+    }
+
+    fun stopTimer() {
+        _timerRunning.value = false
+        timerJob?.cancel()
+        timerJob = null
+    }
+
+    fun resetTimer() {
+        stopTimer()
+        _timeLeft.value = DEFAULT_TIMER_SECONDS
     }
 
     fun previousParticipant() {
         snapshotState()
         _uiState.update { state ->
-            val combined = buildList {
-                state.activeParticipant?.let { add(it) }
-                addAll(state.queue)
-            }
-            if (combined.isEmpty()) return@update state
-            val newActive = combined.last()
-            val newQueue = combined.dropLast(1)
-            state.copy(activeParticipant = newActive, queue = newQueue)
+            val active = state.activeParticipant ?: return@update state
+            if (state.completed.isEmpty()) return@update state
+            val prev = state.completed.last()
+            val newCompleted = state.completed.dropLast(1)
+            state.copy(
+                activeParticipant = prev.copy(results = null),
+                queue = listOf(active.copy(results = null)) + state.queue,
+                completed = newCompleted,
+                scoreState = ThrowNGoScoreState(),
+                logEntries = state.logEntries + logLine("Previous participant")
+            )
         }
         persistState()
     }
@@ -275,114 +434,89 @@ class ThrowNGoScreenModel : ScreenModel {
         snapshotState()
         _uiState.update { state ->
             val active = state.activeParticipant ?: return@update state
-            val newQueue = state.queue + active
-            val next = newQueue.firstOrNull()
-            val remaining = if (newQueue.size <= 1) emptyList() else newQueue.drop(1)
-            state.copy(activeParticipant = next, queue = remaining)
+            if (state.queue.isEmpty()) return@update state
+            val next = state.queue.first()
+            val remaining = state.queue.drop(1)
+            state.copy(
+                activeParticipant = next,
+                queue = remaining + active,
+                scoreState = ThrowNGoScoreState(),
+                logEntries = state.logEntries + logLine("Skipped participant")
+            )
         }
         persistState()
     }
 
     fun clearParticipants() {
         snapshotState()
-        _uiState.value = ThrowNGoUiState()
+        _uiState.value = ThrowNGoUiState(activeParticipant = ThrowNGoParticipant("", "", ""))
         persistState()
     }
 
-    fun importParticipants(csvData: String) {
-        val lines = csvData.lines().filter { it.isNotBlank() }
-        val header = lines.firstOrNull()?.lowercase() ?: return
-        val dataLines = if (header.contains("handler")) lines.drop(1) else lines
-        val participants = dataLines.mapNotNull { line ->
-            val cols = line.split(",").map { it.trim() }
-            if (cols.size < 2) return@mapNotNull null
-            ThrowNGoParticipant(cols.first(), cols[1], cols.getOrElse(2) { "" })
-        }
-        applyImport(participants)
-    }
+    fun exportLog(): String = _uiState.value.logEntries.joinToString("\n")
 
-    fun importParticipantsFromCsv(csvText: String) {
-        val imported = parseCsv(csvText)
-        val participants = imported.map { ThrowNGoParticipant(it.handler, it.dog, it.utn) }
-        applyImport(participants)
-    }
+    enum class ImportMode { ReplaceAll, Add }
 
-    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
-        val imported = parseXlsx(xlsxData)
-        val participants = imported.map { ThrowNGoParticipant(it.handler, it.dog, it.utn) }
-        applyImport(participants)
-    }
-
-    private fun applyImport(participants: List<ThrowNGoParticipant>) {
+    private fun applyImportedParticipants(players: List<ThrowNGoParticipant>, mode: ImportMode) {
+        if (players.isEmpty()) return
         snapshotState()
-        _uiState.update { state ->
-            val first = participants.firstOrNull() ?: return@update state
-            state.copy(
-                activeParticipant = first,
-                queue = participants.drop(1),
-                completed = emptyList(),
-                scoreState = ThrowNGoScoreState()
+        _uiState.update { s ->
+            when (mode) {
+                ImportMode.ReplaceAll -> {
+                    s.copy(
+                        activeParticipant = players.first(),
+                        queue = players.drop(1),
+                        completed = emptyList(),
+                        scoreState = ThrowNGoScoreState(),
+                        logEntries = s.logEntries + logLine("Imported ${players.size} participants")
+                    )
+                }
+
+                ImportMode.Add -> {
+                    if (s.activeParticipant == null) {
+                        s.copy(
+                            activeParticipant = players.first(),
+                            queue = players.drop(1),
+                            logEntries = s.logEntries + logLine("Imported ${players.size} participants (add)")
+                        )
+                    } else {
+                        s.copy(
+                            queue = s.queue + players,
+                            logEntries = s.logEntries + logLine("Imported ${players.size} participants (add)")
+                        )
+                    }
+                }
+            }
+        }
+        persistState()
+    }
+
+    fun importParticipantsFromCsv(contents: String, mode: ImportMode = ImportMode.ReplaceAll) {
+        val imported = parseCsv(contents).map {
+            ThrowNGoParticipant(
+                handler = it.handler,
+                dog = it.dog,
+                utn = it.utn,
+                heightDivision = it.heightDivision
             )
         }
-        persistState()
+        applyImportedParticipants(imported, mode)
     }
 
-    fun exportParticipantsAsCsv(): String {
-        val header = "handler,dog,utn,score,catches,bonus,misses,ob,sweetSpot,allRollers"
-        val participants = buildList {
-            _uiState.value.activeParticipant?.let { active ->
-                add(active.copy(results = ThrowNGoRoundStats(_uiState.value.scoreState)))
-            }
-            addAll(_uiState.value.queue)
-            addAll(_uiState.value.completed)
+    fun importParticipantsFromXlsx(bytes: ByteArray, mode: ImportMode = ImportMode.ReplaceAll) {
+        val imported = parseXlsx(bytes).map {
+            ThrowNGoParticipant(
+                handler = it.handler,
+                dog = it.dog,
+                utn = it.utn,
+                heightDivision = it.heightDivision
+            )
         }
-        return buildString {
-            appendLine(header)
-            participants.forEach { participant ->
-                val stats = participant.results ?: ThrowNGoRoundStats(ThrowNGoScoreState())
-                appendLine(
-                    listOf(
-                        participant.handler,
-                        participant.dog,
-                        participant.utn,
-                        stats.score,
-                        stats.catches,
-                        stats.bonusCatches,
-                        stats.misses,
-                        stats.ob,
-                        stats.sweetSpot,
-                        stats.allRollers
-                    ).joinToString(",")
-                )
-            }
-        }
+        applyImportedParticipants(imported, mode)
     }
 
-    fun exportLog(): String = _uiState.value.logEntries.joinToString(separator = "\n")
-
-    fun startTimer() {
-        timerJob?.cancel()
-        _timeLeft.value = DEFAULT_TIMER_SECONDS
-        _timerRunning.value = true
-        timerJob = screenModelScope.launch {
-            while (_timeLeft.value > 0 && _timerRunning.value) {
-                delay(1000)
-                _timeLeft.update { (it - 1).coerceAtLeast(0) }
-            }
-            _timerRunning.value = false
-        }
-    }
-
-    fun stopTimer() {
-        timerJob?.cancel()
-        timerJob = null
-        _timerRunning.value = false
-    }
-
-    fun resetTimer() {
-        stopTimer()
-        _timeLeft.value = 0
-    }
+    // Backwards-compatible signatures expected by screens that call without mode
+    // (No extra overloads needed; default parameter already covers this.)
 
     private fun snapshotState() {
         val snapshot = _uiState.value.deepCopy()

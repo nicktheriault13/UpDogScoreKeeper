@@ -175,14 +175,14 @@ actual fun generateGreedyXlsx(participants: List<GreedyParticipant>, templateByt
         val workbook = WorkbookFactory.create(inputStream)
         var worksheet = workbook.getSheet("Data Entry Sheet")
         if (worksheet == null) {
-             worksheet = workbook.getSheetAt(0)
+            worksheet = workbook.getSheetAt(0)
         }
 
         val startRow = 3 // Row 4 (0-based is 3)
 
         // Sort participants
         val sortedParticipants = participants.sortedWith(
-            compareByDescending<GreedyScreenModel.GreedyParticipant> { it.score }
+            compareByDescending<GreedyParticipant> { it.score }
                 .thenByDescending { it.zone4Catches }
                 .thenByDescending { it.zone3Catches }
                 .thenByDescending { it.zone2Catches }
@@ -227,8 +227,11 @@ actual fun generateGreedyXlsx(participants: List<GreedyParticipant>, templateByt
             // Column M (12): Number of Misses
             row.createCell(12).setCellValue(p.numberOfMisses.toDouble())
 
-            // Column P (15): All Rollers (Y/N)
-            row.createCell(15).setCellValue(if (p.allRollers) "Y" else "N")
+            // Column P (15): Height Division
+            row.createCell(15).setCellValue(p.heightDivision)
+
+            // Column Q (16): All Rollers (Y/N)
+            row.createCell(16).setCellValue(if (p.allRollers) "Y" else "N")
         }
 
         val bos = ByteArrayOutputStream()
@@ -354,6 +357,101 @@ actual fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templat
             row.createCell(7).setCellValue(r.zonesCaught.toDouble())
             row.createCell(8).setCellValue(if (r.sweetSpot) "Y" else "N")
             row.createCell(11).setCellValue(if (r.allRollers) "Y" else "N")
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
+actual fun generateThrowNGoXlsx(participants: List<ThrowNGoParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 (0-based)
+
+        val sorted = participants.sortedWith(
+            compareByDescending<ThrowNGoParticipant> { it.results?.score ?: 0 }
+                .thenBy { it.results?.misses ?: 0 }
+                .thenByDescending { it.results?.bonusCatches ?: 0 }
+        )
+
+        var outIndex = 0
+        sorted.forEach { p ->
+            val r = p.results ?: return@forEach
+            val hasAnyData = r.score != 0 || r.catches != 0 || r.bonusCatches != 0 || r.misses != 0 || r.ob != 0 || r.sweetSpot || r.allRollers
+            if (!hasAnyData) return@forEach
+
+            val rowNum = startRow + outIndex
+            outIndex += 1
+
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+            row.createCell(0).setCellValue(1.0)
+            row.createCell(1).setCellValue(p.handler)
+            row.createCell(2).setCellValue(p.dog)
+            row.createCell(3).setCellValue(p.utn)
+
+            row.createCell(4).setCellValue(r.catches.toDouble())
+            row.createCell(5).setCellValue(r.bonusCatches.toDouble())
+            row.createCell(6).setCellValue(r.misses.toDouble())
+
+            val exportScore = if (r.sweetSpot) (r.score - 5).coerceAtLeast(0) else r.score
+            row.createCell(7).setCellValue(exportScore.toDouble())
+
+            row.createCell(8).setCellValue(if (r.sweetSpot) "Y" else "N")
+            row.createCell(10).setCellValue(if (r.allRollers) "Y" else "N")
+
+            // Column P (15): Height Division
+            row.createCell(15).setCellValue(p.heightDivision)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
+actual fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 (0-based)
+
+        val sorted = participants.sortedWith(
+            compareByDescending<SevenUpParticipant> { it.jumpSum * 3 + it.nonJumpSum + it.timeRemaining.toInt() }
+                .thenByDescending { it.timeRemaining }
+        )
+
+        var outIndex = 0
+        sorted.forEach { p ->
+            val hasAnyData = p.jumpSum != 0 || p.nonJumpSum != 0 || p.timeRemaining.toInt() != 60 || p.sweetSpotBonus || p.allRollers
+            if (!hasAnyData) return@forEach
+
+            val rowNum = startRow + outIndex
+            outIndex++
+
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+            row.createCell(0).setCellValue(1.0)
+            row.createCell(1).setCellValue(p.handler)
+            row.createCell(2).setCellValue(p.dog)
+            row.createCell(3).setCellValue(p.utn)
+            row.createCell(4).setCellValue(p.jumpSum.toDouble())
+            row.createCell(6).setCellValue(p.nonJumpSum.toDouble())
+            row.createCell(8).setCellValue(p.timeRemaining.toDouble())
+            row.createCell(10).setCellValue(if (p.sweetSpotBonus) "Y" else "N")
+            row.createCell(12).setCellValue(if (p.allRollers) "Y" else "N")
+            row.createCell(15).setCellValue(p.heightDivision)
         }
 
         ByteArrayOutputStream().use { bos ->

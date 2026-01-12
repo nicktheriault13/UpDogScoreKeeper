@@ -160,6 +160,7 @@ class TimeWarpScreenModel : ScreenModel {
         _currentParticipantLog.update { (it + "$ts: $message").takeLast(300) }
     }
 
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
     private val exportJson = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true

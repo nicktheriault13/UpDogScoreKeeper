@@ -1,25 +1,20 @@
-@file:OptIn(ExperimentalLayoutApi::class)
-
 package com.ddsk.app.ui.screens.games
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.ButtonDefaults
@@ -34,20 +29,20 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import com.ddsk.app.media.rememberAudioPlayer
-import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
+import com.ddsk.app.persistence.rememberDataStore
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ddsk.app.persistence.rememberDataStore
+import androidx.compose.material.MaterialTheme
 
 object ThrowNGoScreen : Screen {
     @Composable
@@ -61,22 +56,33 @@ object ThrowNGoScreen : Screen {
         val timerRunning by screenModel.timerRunning.collectAsState()
         val timeLeft by screenModel.timeLeft.collectAsState()
 
-        val scope = rememberCoroutineScope()
-        var showAddParticipant by remember { mutableStateOf(false) }
-        var handlerInput by remember { mutableStateOf("") }
-        var dogInput by remember { mutableStateOf("") }
-        var utnInput by remember { mutableStateOf("") }
+        val pendingJsonExport by screenModel.pendingJsonExport.collectAsState()
 
-        var exportBuffer by remember { mutableStateOf<String?>(null) }
-        var logBuffer by remember { mutableStateOf<String?>(null) }
+        val scope = rememberCoroutineScope()
+
+        var showAddParticipant by remember { mutableStateOf(false) }
+
+        var showImportModeDialog by remember { mutableStateOf(false) }
+        var pendingImportResult by remember { mutableStateOf<ImportResult?>(null) }
+
+        // Import / Export helpers
+        val assetLoader = rememberAssetLoader()
+        val exporter = rememberFileExporter()
+
+        // When model emits a pending JSON export, prompt user to save it.
+        LaunchedEffect(pendingJsonExport) {
+            val pending = pendingJsonExport ?: return@LaunchedEffect
+            saveJsonFileWithPicker(pending.filename, pending.content)
+            screenModel.consumePendingJsonExport()
+        }
 
         val filePicker = rememberFilePicker { result ->
-            scope.launch {
-                when (result) {
-                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
-                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
-                    else -> {}
+            when (result) {
+                is ImportResult.Csv, is ImportResult.Xlsx -> {
+                    pendingImportResult = result
+                    showImportModeDialog = true
                 }
+                else -> { /* ignore */ }
             }
         }
 
@@ -91,203 +97,333 @@ object ThrowNGoScreen : Screen {
         }
 
         Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                HeaderRow(
-                    uiState = uiState,
-                    timerRunning = timerRunning,
-                    timeLeft = timeLeft,
-                    onTimerToggle = {
-                        if (timerRunning) screenModel.stopTimer() else screenModel.startTimer()
-                    },
-                    onTimerReset = screenModel::resetTimer,
-                    onUndo = screenModel::undo,
-                    onSweetSpot = screenModel::toggleSweetSpot,
-                    onMiss = screenModel::incrementMiss,
-                    onOb = screenModel::incrementOb
-                )
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val columnSpacing = 16.dp
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(columnSpacing),
+                    horizontalArrangement = Arrangement.spacedBy(columnSpacing)
+                ) {
+                    // Left (main gameplay) column
+                    Column(
+                        modifier = Modifier
+                            .weight(2f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                    ) {
+                        ThrowNGoScoreSummaryCard(uiState = uiState)
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                    Sidebar(
-                        modifier = Modifier.width(180.dp),
-                        onImport = { filePicker.launch() },
-                        onExport = { exportBuffer = screenModel.exportParticipantsAsCsv() },
-                        onExportLog = { logBuffer = screenModel.exportLog() },
-                        onAddTeam = { showAddParticipant = true },
-                        onHelp = {},
-                        onReset = screenModel::resetRound,
-                        onFlip = screenModel::flipField,
-                        onPrevious = screenModel::previousParticipant,
-                        onNext = screenModel::nextParticipant,
-                        onSkip = screenModel::skipParticipant,
-                        allRollersActive = uiState.scoreState.allRollersActive,
-                        onAllRollersToggle = screenModel::toggleAllRollers
-                    )
+                        Box(modifier = Modifier.weight(1f)) {
+                            ScoringGrid(onScore = screenModel::recordThrow)
+                        }
 
-                    ParticipantList(uiState = uiState, modifier = Modifier.width(220.dp))
+                        ThrowNGoControlRow(
+                            timerRunning = timerRunning,
+                            timeLeft = timeLeft,
+                            onTimerToggle = { if (timerRunning) screenModel.stopTimer() else screenModel.startTimer() },
+                            onTimerReset = screenModel::resetTimer,
+                            onUndo = screenModel::undo,
+                            onSweetSpot = screenModel::toggleSweetSpot,
+                            sweetSpotActive = uiState.scoreState.sweetSpotActive,
+                            onAllRollers = screenModel::toggleAllRollers,
+                            allRollersActive = uiState.scoreState.allRollersActive,
+                            onMiss = screenModel::incrementMiss,
+                            onOb = screenModel::incrementOb,
+                            onFlipField = screenModel::flipField,
+                            onNext = screenModel::nextParticipant,
+                            onSkip = screenModel::skipParticipant
+                        )
+                    }
 
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        ScoringGrid(
-                            onScore = screenModel::recordThrow
+                    // Right (queue + import/export) column
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                    ) {
+                        ThrowNGoTimerCard(
+                            timerRunning = timerRunning,
+                            timeLeft = timeLeft,
+                            onStartStop = { if (timerRunning) screenModel.stopTimer() else screenModel.startTimer() },
+                            onReset = screenModel::resetTimer
+                        )
+
+                        ParticipantList(uiState = uiState, modifier = Modifier.fillMaxWidth().weight(1f))
+
+                        ThrowNGoImportExportCard(
+                            onImportClick = { filePicker.launch() },
+                            onExportClick = {
+                                val template = assetLoader.load("templates/UDC Throw N Go Data Entry L1 or L2 Div Sort.xlsx")
+                                if (template != null) {
+                                    val bytes = screenModel.exportScoresXlsx(template)
+                                    exporter.save("ThrowNGo_Scores.xlsx", bytes)
+                                }
+                            },
+                            onExportLogClick = {
+                                val content = screenModel.exportLog()
+                                scope.launch {
+                                    saveJsonFileWithPicker("ThrowNGo_Log.txt", content)
+                                }
+                            },
+                            onAddTeamClick = { showAddParticipant = true },
+                            onPreviousClick = screenModel::previousParticipant,
+                            onClearClick = screenModel::clearParticipants
                         )
                     }
                 }
-
-                LogCard(logLines = uiState.logEntries)
             }
         }
 
         if (showAddParticipant) {
             ParticipantDialog(
-                handler = handlerInput,
-                dog = dogInput,
-                utn = utnInput,
-                onHandlerChange = { handlerInput = it },
-                onDogChange = { dogInput = it },
-                onUtnChange = { utnInput = it },
                 onDismiss = { showAddParticipant = false },
-                onConfirm = {
-                    screenModel.addParticipant(handlerInput, dogInput, utnInput)
-                    handlerInput = ""
-                    dogInput = ""
-                    utnInput = ""
+                onConfirm = { handler, dog, utn ->
+                    screenModel.addParticipant(handler, dog, utn)
                     showAddParticipant = false
                 }
             )
         }
 
-        exportBuffer?.let { payload ->
-            TextPreviewDialog(
-                title = "Export Participants",
-                text = payload,
-                onDismiss = { exportBuffer = null }
-            )
-        }
-
-        logBuffer?.let { payload ->
-            TextPreviewDialog(
-                title = "Run Log",
-                text = payload,
-                onDismiss = { logBuffer = null }
+        if (showImportModeDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    showImportModeDialog = false
+                    pendingImportResult = null
+                },
+                title = { Text("Import participants") },
+                text = { Text("Would you like to add these participants to the current list, or replace everything?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val import = pendingImportResult
+                            if (import is ImportResult.Csv) {
+                                screenModel.importParticipantsFromCsv(import.contents, ThrowNGoScreenModel.ImportMode.Add)
+                            } else if (import is ImportResult.Xlsx) {
+                                screenModel.importParticipantsFromXlsx(import.bytes, ThrowNGoScreenModel.ImportMode.Add)
+                            }
+                            showImportModeDialog = false
+                            pendingImportResult = null
+                        }
+                    ) { Text("Add") }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(
+                            onClick = {
+                                val import = pendingImportResult
+                                if (import is ImportResult.Csv) {
+                                    screenModel.importParticipantsFromCsv(import.contents, ThrowNGoScreenModel.ImportMode.ReplaceAll)
+                                } else if (import is ImportResult.Xlsx) {
+                                    screenModel.importParticipantsFromXlsx(import.bytes, ThrowNGoScreenModel.ImportMode.ReplaceAll)
+                                }
+                                showImportModeDialog = false
+                                pendingImportResult = null
+                            }
+                        ) { Text("Replace") }
+                        TextButton(
+                            onClick = {
+                                showImportModeDialog = false
+                                pendingImportResult = null
+                            }
+                        ) { Text("Cancel") }
+                    }
+                }
             )
         }
     }
 }
 
 @Composable
-private fun HeaderRow(
-    uiState: ThrowNGoUiState,
+private fun ThrowNGoScoreSummaryCard(uiState: ThrowNGoUiState) {
+    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Score: ${uiState.scoreState.score}", style = MaterialTheme.typography.h4)
+                Text(
+                    text = "Catches: ${uiState.scoreState.catches} • Bonus: ${uiState.scoreState.bonusCatches}",
+                    style = MaterialTheme.typography.body2,
+                    color = Color(0xFF49454F)
+                )
+            }
+
+            val active = uiState.activeParticipant
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Misses: ${uiState.scoreState.misses} • OB: ${uiState.scoreState.ob}",
+                    style = MaterialTheme.typography.body2,
+                    color = Color(0xFF49454F)
+                )
+                Text(
+                    text = active?.let { "Active: ${it.handler} & ${it.dog}" } ?: "No active team",
+                    style = MaterialTheme.typography.subtitle1,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThrowNGoTimerCard(
+    timerRunning: Boolean,
+    timeLeft: Int,
+    onStartStop: () -> Unit,
+    onReset: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(
+                onClick = onStartStop,
+                colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) Color(0xFFFFB74D) else Color(0xFF2196F3))
+            ) {
+                Text(if (timerRunning) "${timeLeft}s" else "Timer", color = Color.White)
+            }
+            Button(onClick = onReset, enabled = !timerRunning) { Text("Reset") }
+        }
+    }
+}
+
+@Composable
+private fun ThrowNGoImportExportCard(
+    onImportClick: () -> Unit,
+    onExportClick: () -> Unit,
+    onExportLogClick: () -> Unit,
+    onAddTeamClick: () -> Unit,
+    onPreviousClick: () -> Unit,
+    onClearClick: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(text = "Actions", fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onImportClick, modifier = Modifier.weight(1f)) { Text("Import") }
+                Button(onClick = onExportClick, modifier = Modifier.weight(1f)) { Text("Export") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onExportLogClick, modifier = Modifier.weight(1f)) { Text("Log") }
+                Button(onClick = onAddTeamClick, modifier = Modifier.weight(1f)) { Text("Add") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onPreviousClick, modifier = Modifier.weight(1f)) { Text("Previous") }
+                Button(onClick = onClearClick, modifier = Modifier.weight(1f)) { Text("Clear") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThrowNGoControlRow(
     timerRunning: Boolean,
     timeLeft: Int,
     onTimerToggle: () -> Unit,
     onTimerReset: () -> Unit,
     onUndo: () -> Unit,
     onSweetSpot: () -> Unit,
+    sweetSpotActive: Boolean,
+    onAllRollers: () -> Unit,
+    allRollersActive: Boolean,
     onMiss: () -> Unit,
-    onOb: () -> Unit
+    onOb: () -> Unit,
+    onFlipField: () -> Unit,
+    onNext: () -> Unit,
+    onSkip: () -> Unit
 ) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Button(onClick = onTimerToggle, colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) Color(0xFFFFB74D) else Color(0xFF2196F3))) {
+            Button(
+                onClick = onTimerToggle,
+                colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) Color(0xFFFFB74D) else Color(0xFF2196F3))
+            ) {
                 Text(if (timerRunning) "${timeLeft}s" else "Timer", color = Color.White)
             }
-            Button(onClick = onTimerReset, enabled = !timerRunning) {
-                Text("Reset")
-            }
-            Column(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                Text(text = uiState.activeParticipant?.displayName ?: "No team", fontWeight = FontWeight.Bold)
-                Text(text = "Score: ${uiState.scoreState.score} • Misses: ${uiState.scoreState.misses} • OB: ${uiState.scoreState.ob}")
-            }
+            Button(onClick = onTimerReset, enabled = !timerRunning) { Text("Reset") }
+
             Button(onClick = onUndo) { Text("Undo") }
-            Button(onClick = onSweetSpot, colors = ButtonDefaults.buttonColors(backgroundColor = if (uiState.scoreState.sweetSpotActive) Color(0xFF00C853) else Color(0xFFFF9100))) {
+
+            Button(
+                onClick = onSweetSpot,
+                colors = ButtonDefaults.buttonColors(backgroundColor = if (sweetSpotActive) Color(0xFF00C853) else Color(0xFFFF9100))
+            ) {
                 Text("Sweet Spot", color = Color.White)
             }
+
+            Button(
+                onClick = onAllRollers,
+                colors = ButtonDefaults.buttonColors(backgroundColor = if (allRollersActive) Color(0xFF00C853) else Color(0xFF2979FF))
+            ) {
+                Text("All Rollers", color = Color.White)
+            }
+
             Button(onClick = onMiss, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFD50000))) {
                 Text("Miss", color = Color.White)
             }
             Button(onClick = onOb, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFFFB74D))) {
                 Text("OB", color = Color(0xFF442800))
             }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Button(onClick = onFlipField) { Text("Flip") }
+            Button(onClick = onNext) { Text("Next") }
+            Button(onClick = onSkip) { Text("Skip") }
         }
     }
 }
 
-@Composable
-private fun Sidebar(
-    modifier: Modifier = Modifier,
-    onImport: () -> Unit,
-    onExport: () -> Unit,
-    onExportLog: () -> Unit,
-    onAddTeam: () -> Unit,
-    onHelp: () -> Unit,
-    onReset: () -> Unit,
-    onFlip: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onSkip: () -> Unit,
-    allRollersActive: Boolean,
-    onAllRollersToggle: () -> Unit
-) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SidebarButton(label = "Import", onClick = onImport)
-            SidebarButton(label = "Export", onClick = onExport)
-            SidebarButton(label = "Log", onClick = onExportLog)
-            SidebarButton(label = "Add Team", onClick = onAddTeam)
-            SidebarButton(label = "Help", onClick = onHelp)
-            SidebarButton(label = "Reset", onClick = onReset)
-            SidebarButton(label = "Flip Field", onClick = onFlip)
-            SidebarButton(label = "Previous", onClick = onPrevious)
-            SidebarButton(label = "Next", onClick = onNext)
-            SidebarButton(label = "Skip", onClick = onSkip)
-            SidebarButton(label = if (allRollersActive) "All Rollers On" else "All Rollers", onClick = onAllRollersToggle)
-        }
-    }
-}
-
-@Composable
-private fun SidebarButton(label: String, onClick: () -> Unit) {
-    Button(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Text(label)
-    }
-}
-
-@Composable
-private fun ParticipantList(uiState: ThrowNGoUiState, modifier: Modifier = Modifier) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = modifier.heightIn(min = 200.dp)) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(text = "Remaining (${uiState.queue.size})", fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(uiState.queue) { participant ->
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(participant.displayName, fontWeight = FontWeight.SemiBold)
-                        Text(participant.utn, fontSize = 12.sp, color = Color.Gray)
-                    }
-                }
-            }
-        }
-    }
-}
+// Log display intentionally removed from the gameplay screen.
 
 @Composable
 private fun ScoringGrid(onScore: (Int, Boolean) -> Unit) {
-    Card(shape = RoundedCornerShape(18.dp), elevation = 8.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            listOf(
+    Card(shape = RoundedCornerShape(18.dp), elevation = 8.dp, modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            val rows = listOf(
                 listOf(1, 3, 4, 5, 6),
                 listOf(1, 6, 8, 10, 12),
                 listOf(1, 3, 4, 5, 6)
-            ).forEachIndexed { rowIndex, rowValues ->
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            )
+
+            rows.forEachIndexed { rowIndex, rowValues ->
+                val isBonusRow = rowIndex == 1
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(if (isBonusRow) 2f else 1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     rowValues.forEach { value ->
                         Button(
-                            onClick = { onScore(value, rowIndex == 1) },
-                            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFF500A1), contentColor = Color.White),
-                            modifier = Modifier.weight(1f).height(if (rowIndex == 1) 110.dp else 80.dp)
+                            onClick = { onScore(value, isBonusRow) },
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFFF500A1),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
                         ) {
                             Text("$value", fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         }
@@ -299,44 +435,29 @@ private fun ScoringGrid(onScore: (Int, Boolean) -> Unit) {
 }
 
 @Composable
-private fun LogCard(logLines: List<String>) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp).height(140.dp)) {
-            Text(text = "Log", fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            val scrollState = rememberScrollState()
-            Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
-                logLines.asReversed().forEach { line ->
-                    Text(text = line, fontSize = 12.sp)
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun ParticipantDialog(
-    handler: String,
-    dog: String,
-    utn: String,
-    onHandlerChange: (String) -> Unit,
-    onDogChange: (String) -> Unit,
-    onUtnChange: (String) -> Unit,
     onDismiss: () -> Unit,
-    onConfirm: () -> Unit
+    onConfirm: (handler: String, dog: String, utn: String) -> Unit
 ) {
+    var handler by remember { mutableStateOf("") }
+    var dog by remember { mutableStateOf("") }
+    var utn by remember { mutableStateOf("") }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add Team") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = handler, onValueChange = onHandlerChange, label = { Text("Handler") })
-                OutlinedTextField(value = dog, onValueChange = onDogChange, label = { Text("Dog") })
-                OutlinedTextField(value = utn, onValueChange = onUtnChange, label = { Text("UTN") })
+                OutlinedTextField(value = handler, onValueChange = { handler = it }, label = { Text("Handler") })
+                OutlinedTextField(value = dog, onValueChange = { dog = it }, label = { Text("Dog") })
+                OutlinedTextField(value = utn, onValueChange = { utn = it }, label = { Text("UTN") })
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm, enabled = handler.isNotBlank() && dog.isNotBlank() && utn.isNotBlank()) {
+            TextButton(
+                onClick = { onConfirm(handler.trim(), dog.trim(), utn.trim()) },
+                enabled = handler.isNotBlank() && dog.isNotBlank() && utn.isNotBlank()
+            ) {
                 Text("Add")
             }
         },
@@ -347,18 +468,26 @@ private fun ParticipantDialog(
 }
 
 @Composable
-private fun TextPreviewDialog(title: String, text: String, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = {},
-                modifier = Modifier.fillMaxWidth().height(220.dp),
-                readOnly = true
-            )
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
-    )
+private fun ParticipantList(uiState: ThrowNGoUiState, modifier: Modifier = Modifier) {
+    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(text = "Remaining (${uiState.queue.size})", fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Queue list
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(uiState.queue) { participant ->
+                    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                        Text(participant.displayName, fontWeight = FontWeight.SemiBold)
+                        if (participant.utn.isNotBlank()) {
+                            Text(participant.utn, fontSize = 12.sp, color = Color.Gray)
+                        }
+                        if (participant.heightDivision.isNotBlank()) {
+                            Text("Height: ${participant.heightDivision}", fontSize = 12.sp, color = Color(0xFF49454F))
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

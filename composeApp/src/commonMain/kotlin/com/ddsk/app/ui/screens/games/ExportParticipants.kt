@@ -7,6 +7,7 @@ data class GreedyParticipant(
     val handler: String,
     val dog: String,
     val utn: String,
+    val heightDivision: String = "",
     val zone1Catches: Int = 0,
     val zone2Catches: Int = 0,
     val zone3Catches: Int = 0,

@@ -54,7 +54,9 @@ private val boomPink = Color(0xFFF500A1)
 private val disabledBackground = Color(0xFFF1F1F1)
 private val disabledContent = Color(0xFF222222)
 
-private data class ButtonPalette(val background: Color, val content: Color)
+// K2 can be stricter about file-private visibility when used from other top-level initializers.
+// Keep this file-local, but make it non-private to avoid 'Cannot access ... it is private in file'.
+data class ButtonPalette(val background: Color, val content: Color)
 
 private val scoringBasePalette = mapOf(
     BoomScoringButton.One to ButtonPalette(Color(0xFF2979FF), Color.White),

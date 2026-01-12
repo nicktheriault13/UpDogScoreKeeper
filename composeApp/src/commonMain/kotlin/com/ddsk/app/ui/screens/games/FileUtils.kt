@@ -29,6 +29,9 @@ data class FourWayPlayExportParticipant(
     val misses: Int
 )
 
+// Remove duplicate SevenUpParticipant data class (defined in SevenUpScreenModel).
+// SevenUp XLSM export uses the SevenUpParticipant type from SevenUpScreenModel.
+
 sealed class ImportResult {
     data class Csv(val contents: String) : ImportResult()
     data class Xlsx(val bytes: ByteArray) : ImportResult()
@@ -54,13 +57,26 @@ interface FilePickerLauncher {
 @Composable
 expect fun rememberFilePicker(onResult: (ImportResult) -> Unit): FilePickerLauncher
 
+// Asset loader for reading bundled templates/docs across platforms
+interface AssetLoader {
+    /**
+     * @param path relative path under the shared assets folder, e.g. "templates/foo.xlsx"
+     */
+    fun load(path: String): ByteArray?
+}
+
+@Composable
+expect fun rememberAssetLoader(): AssetLoader
+
 // These expected functions might be implemented differently on each platform
 expect fun parseXlsx(bytes: ByteArray): List<ImportedParticipant>
-expect fun generateFarOutXlsx(participants: List<com.ddsk.app.ui.screens.games.FarOutParticipant>, templateBytes: ByteArray): ByteArray
-expect fun generateGreedyXlsx(participants: List<com.ddsk.app.ui.screens.games.GreedyParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateFarOutXlsx(participants: List<FarOutParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateGreedyXlsx(participants: List<GreedyParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateFourWayPlayXlsx(participants: List<FourWayPlayExportParticipant>, templateBytes: ByteArray): ByteArray
-expect fun generateFireballXlsx(participants: List<com.ddsk.app.ui.screens.games.FireballParticipant>, templateBytes: ByteArray): ByteArray
-expect fun generateTimeWarpXlsx(participants: List<com.ddsk.app.ui.screens.games.TimeWarpParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateFireballXlsx(participants: List<FireballParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateThrowNGoXlsx(participants: List<ThrowNGoParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateBytes: ByteArray): ByteArray
 
 // From GameImporter.kt
 expect fun parseXlsxRows(bytes: ByteArray): List<List<String>>
@@ -151,10 +167,3 @@ private data class ColumnExtractor(
         }
     }
 }
-
-interface AssetLoader {
-    fun load(path: String): ByteArray?
-}
-
-@Composable
-expect fun rememberAssetLoader(): AssetLoader

@@ -263,8 +263,11 @@ actual fun generateGreedyXlsx(participants: List<GreedyParticipant>, templateByt
             // Column M (12): Number of Misses
             row.createCell(12).setCellValue(p.numberOfMisses.toDouble())
 
-            // Column P (15): All Rollers (Y/N)
-            row.createCell(15).setCellValue(if (p.allRollers) "Y" else "N")
+            // Column P (15): Height Division
+            row.createCell(15).setCellValue(p.heightDivision)
+
+            // Column Q (16): All Rollers (Y/N)
+            row.createCell(16).setCellValue(if (p.allRollers) "Y" else "N")
         }
 
         val bos = ByteArrayOutputStream()
@@ -425,6 +428,129 @@ actual fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templat
             row.createCell(8).setCellValue(if (r.sweetSpot) "Y" else "N")
             // Column L (11): All Rollers (Y/N)
             row.createCell(11).setCellValue(if (r.allRollers) "Y" else "N")
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
+actual fun generateThrowNGoXlsx(participants: List<ThrowNGoParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 in Excel (0-based)
+
+        // Sort same as React: score desc, misses asc, bonus desc
+        val sorted = participants.sortedWith(
+            compareByDescending<ThrowNGoParticipant> { it.results?.score ?: 0 }
+                .thenBy { it.results?.misses ?: 0 }
+                .thenByDescending { it.results?.bonusCatches ?: 0 }
+        )
+
+        var outIndex = 0
+        sorted.forEach { p ->
+            val r = p.results ?: return@forEach
+
+            // Only export rows that have any scoring data
+            val hasAnyData = r.score != 0 || r.catches != 0 || r.bonusCatches != 0 || r.misses != 0 || r.ob != 0 || r.sweetSpot || r.allRollers
+            if (!hasAnyData) return@forEach
+
+            val rowNum = startRow + outIndex
+            outIndex += 1
+
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+
+            // Column A (0): Level
+            row.createCell(0).setCellValue(1.0)
+            // Column B (1): Handler
+            row.createCell(1).setCellValue(p.handler)
+            // Column C (2): Dog
+            row.createCell(2).setCellValue(p.dog)
+            // Column D (3): UTN
+            row.createCell(3).setCellValue(p.utn)
+
+            // Column E (4): Catches
+            row.createCell(4).setCellValue(r.catches.toDouble())
+            // Column F (5): Bonus Catches
+            row.createCell(5).setCellValue(r.bonusCatches.toDouble())
+            // Column G (6): Misses
+            row.createCell(6).setCellValue(r.misses.toDouble())
+
+            // Column H (7): Score (template expects score excluding Sweet Spot points)
+            val exportScore = if (r.sweetSpot) (r.score - 5).coerceAtLeast(0) else r.score
+            row.createCell(7).setCellValue(exportScore.toDouble())
+
+            // Column I (8): Sweet Spot (Y/N)
+            row.createCell(8).setCellValue(if (r.sweetSpot) "Y" else "N")
+
+            // Column K (10): All Rollers (Y/N)
+            row.createCell(10).setCellValue(if (r.allRollers) "Y" else "N")
+
+            // Column P (15): Height Division
+            row.createCell(15).setCellValue(p.heightDivision)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
+actual fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 (0-based)
+
+        // Sort like React: finalScore desc, then timeRemaining desc
+        val sorted = participants.sortedWith(
+            compareByDescending<SevenUpParticipant> { it.jumpSum * 3 + it.nonJumpSum + it.timeRemaining.toInt() }
+                .thenByDescending { it.timeRemaining }
+        )
+
+        var outIndex = 0
+        sorted.forEach { p ->
+            // Only export teams with any scoring data (align with other exports)
+            val hasAnyData = p.jumpSum != 0 || p.nonJumpSum != 0 || p.timeRemaining.toInt() != 60 || p.sweetSpotBonus || p.allRollers
+            if (!hasAnyData) return@forEach
+
+            val rowNum = startRow + outIndex
+            outIndex++
+
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+
+            // Column A (0): Level
+            row.createCell(0).setCellValue(1.0)
+            // Column B (1): Handler
+            row.createCell(1).setCellValue(p.handler)
+            // Column C (2): Dog
+            row.createCell(2).setCellValue(p.dog)
+            // Column D (3): UTN
+            row.createCell(3).setCellValue(p.utn)
+            // Column E (4): Jump Sum
+            row.createCell(4).setCellValue(p.jumpSum.toDouble())
+            // Column G (6): Non-Jump Sum
+            row.createCell(6).setCellValue(p.nonJumpSum.toDouble())
+            // Column I (8): Time Remaining (0.00)
+            row.createCell(8).setCellValue(p.timeRemaining.toDouble())
+            // Column K (10): Sweet Spot (Y/N)
+            row.createCell(10).setCellValue(if (p.sweetSpotBonus) "Y" else "N")
+            // Column M (12): All Rollers (Y/N)
+            row.createCell(12).setCellValue(if (p.allRollers) "Y" else "N")
+            // Column P (15): Height Division
+            row.createCell(15).setCellValue(p.heightDivision)
         }
 
         ByteArrayOutputStream().use { bos ->
