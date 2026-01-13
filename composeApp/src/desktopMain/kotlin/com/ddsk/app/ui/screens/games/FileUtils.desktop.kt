@@ -2,54 +2,66 @@ package com.ddsk.app.ui.screens.games
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
-import com.ddsk.app.ui.screens.games.GreedyScreenModel
-import com.ddsk.app.ui.screens.games.FarOutParticipant
-import com.ddsk.app.ui.screens.games.FourWayPlayExportParticipant
-import com.ddsk.app.ui.screens.games.ImportedParticipant
-import com.ddsk.app.ui.screens.games.ImportResult
-import org.apache.poi.ss.usermodel.WorkbookFactory
-import org.apache.poi.ss.usermodel.CellType
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import javax.swing.JFileChooser
-import javax.swing.filechooser.FileNameExtensionFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.apache.poi.ss.usermodel.WorkbookFactory
+import java.awt.EventQueue
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.atomic.AtomicReference
+import javax.swing.JFileChooser
+import javax.swing.filechooser.FileNameExtensionFilter
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 @Composable
 actual fun rememberFilePicker(onResult: (ImportResult) -> Unit): FilePickerLauncher {
     val scope = rememberCoroutineScope()
     return object : FilePickerLauncher {
         override fun launch() {
-            scope.launch(Dispatchers.IO) {
-                val chooser = JFileChooser().apply {
-                    fileFilter = FileNameExtensionFilter("CSV or Excel", "csv", "xlsx", "xls", "xlsm")
-                    isAcceptAllFileFilterUsed = true
-                }
-                val result = chooser.showOpenDialog(null)
-                if (result == JFileChooser.APPROVE_OPTION) {
-                    val file = chooser.selectedFile
-                    if (file != null) {
-                         try {
-                            val bytes = file.readBytes()
-                            val res = when (file.extension.lowercase()) {
-                                "xlsx", "xlsm", "xls" -> ImportResult.Xlsx(bytes)
-                                else -> ImportResult.Csv(bytes.decodeToString())
-                            }
-                            onResult(res)
-                         } catch (e: Exception) {
-                            onResult(ImportResult.Error(e.message ?: "Unknown error"))
-                         }
-                    } else {
-                        onResult(ImportResult.Cancelled)
+            scope.launch {
+                // On Desktop, Dispatchers.Main is not guaranteed to exist, and Swing UI must run on the EDT.
+                val selected = withContext(Dispatchers.IO) {
+                    runOnSwingEdt {
+                        val chooser = JFileChooser().apply {
+                            fileFilter = FileNameExtensionFilter("CSV or Excel", "csv", "xlsx", "xls", "xlsm")
+                            isAcceptAllFileFilterUsed = true
+                        }
+                        val result = chooser.showOpenDialog(null)
+                        if (result == JFileChooser.APPROVE_OPTION) chooser.selectedFile else null
                     }
-                } else {
+                }
+
+                if (selected == null) {
                     onResult(ImportResult.Cancelled)
+                    return@launch
+                }
+
+                withContext(Dispatchers.IO) {
+                    try {
+                        val bytes = selected.readBytes()
+                        val res = when (selected.extension.lowercase()) {
+                            "xlsx", "xlsm", "xls" -> ImportResult.Xlsx(bytes)
+                            else -> ImportResult.Csv(bytes.decodeToString())
+                        }
+                        onResult(res)
+                    } catch (e: Exception) {
+                        onResult(ImportResult.Error(e.message ?: "Unknown error"))
+                    }
                 }
             }
         }
     }
+}
+
+private fun <T> runOnSwingEdt(block: () -> T): T {
+    if (EventQueue.isDispatchThread()) return block()
+    val ref = AtomicReference<T>()
+    EventQueue.invokeAndWait {
+        ref.set(block())
+    }
+    return ref.get()
 }
 
 actual fun parseXlsx(bytes: ByteArray): List<ImportedParticipant> {
@@ -152,7 +164,9 @@ actual fun rememberAssetLoader(): AssetLoader {
                 // Try to load as a resource from the classpath (for commonMain/resources)
                 val resourcePath = "assets/$path"
                 val stream = Thread.currentThread().contextClassLoader.getResourceAsStream(resourcePath)
-                    ?: java.lang.Class.forName("com.ddsk.app.ui.screens.games.FileUtilsDesktopKt").classLoader.getResourceAsStream(resourcePath)
+                    ?: Class.forName("com.ddsk.app.ui.screens.games.FileUtilsDesktopKt")
+                        .classLoader
+                        .getResourceAsStream(resourcePath)
 
                 if (stream != null) {
                     return stream.readBytes()

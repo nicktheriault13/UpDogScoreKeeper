@@ -34,6 +34,7 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.rememberDataStore
+import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -43,10 +44,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.MaterialTheme
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
+import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
 
 object ThrowNGoScreen : Screen {
     @Composable
     override fun Content() {
+        val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { ThrowNGoScreenModel() }
         val dataStore = rememberDataStore()
         LaunchedEffect(Unit) {
@@ -98,6 +103,8 @@ object ThrowNGoScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                GameHomeOverlay(navigator = navigator)
+
                 val columnSpacing = 16.dp
                 Row(
                     modifier = Modifier

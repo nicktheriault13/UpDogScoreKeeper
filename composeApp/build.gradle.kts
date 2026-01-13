@@ -2,7 +2,6 @@ import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.gradle.api.file.DuplicatesStrategy
 import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
-import kotlinx.coroutines.launch
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -45,6 +44,7 @@ kotlin {
                 implementation(compose.components.uiToolingPreview)
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kotlinx.datetime)
+                implementation(libs.kotlinx.coroutines.core)
 
                 // Voyager
                 implementation(libs.voyager.navigator)
@@ -86,6 +86,8 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation("org.apache.poi:poi:5.2.5")
                 implementation("org.apache.poi:poi-ooxml:5.2.5")
+                implementation(libs.kotlinx.coroutines.core)
+                implementation(libs.kotlinx.coroutines.swing)
             }
         }
         val iosMain by creating {

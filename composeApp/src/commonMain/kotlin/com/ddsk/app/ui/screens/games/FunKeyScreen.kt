@@ -13,27 +13,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Card
-import androidx.compose.material.Icon
-import androidx.compose.material.IconButton
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
-import androidx.compose.material.TextButton
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -44,7 +35,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -55,23 +45,54 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
-import com.ddsk.app.persistence.rememberDataStore
-import com.ddsk.app.ui.screens.games.FunKeyColors.vPrimary
-import com.ddsk.app.ui.screens.games.FunKeyColors.vPrimaryOn
-import com.ddsk.app.ui.screens.games.FunKeyColors.vSuccess
-import com.ddsk.app.ui.screens.games.FunKeyColors.vSuccessOn
-import com.ddsk.app.ui.screens.games.FunKeyColors.vWarning
-import com.ddsk.app.ui.screens.games.FunKeyColors.vWarningOn
-import com.ddsk.app.ui.screens.games.FunKeyColors.mdBackground
-import com.ddsk.app.ui.screens.games.FunKeyColors.mdOutline
-import com.ddsk.app.ui.screens.games.FunKeyColors.mdOutlineVariant
-import com.ddsk.app.ui.screens.games.FunKeyColors.mdPrimary
-import com.ddsk.app.ui.screens.games.FunKeyColors.mdPrimaryContainer
-import com.ddsk.app.ui.screens.games.FunKeyColors.mdSurface
-import com.ddsk.app.ui.screens.games.FunKeyColors.mdSurfaceContainer
-import com.ddsk.app.ui.screens.games.FunKeyColors.mdText
+import com.ddsk.app.persistence.*
+import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
+
+// Shared Color Palettes
+private val mdPrimary = Color(0xFF6750A4)
+private val mdOnPrimary = Color(0xFFFFFFFF)
+private val mdPrimaryContainer = Color(0xFFEADDFF)
+private val mdOnPrimaryContainer = Color(0xFF21005D)
+private val mdSecondary = Color(0xFF625B71)
+private val mdOnSecondary = Color(0xFFFFFFFF)
+private val mdSecondaryContainer = Color(0xFFE8DEF8)
+private val mdOnSecondaryContainer = Color(0xFF1D192B)
+private val mdTertiary = Color(0xFF7D5260)
+private val mdOnTertiary = Color(0xFFFFFFFF)
+private val mdTertiaryContainer = Color(0xFFFFD8E4)
+private val mdOnTertiaryContainer = Color(0xFF31111D)
+private val mdError = Color(0xFFB3261E)
+private val mdOnError = Color(0xFFFFFFFF)
+private val mdErrorContainer = Color(0xFFF9DEDC)
+private val mdOnErrorContainer = Color(0xFF410E0B)
+private val mdBackground = Color(0xFFFFFBFE)
+private val mdOnBackground = Color(0xFF1C1B1F)
+private val mdSurface = Color(0xFFFFFBFE)
+private val mdOnSurface = Color(0xFF1C1B1F)
+private val mdSurfaceVariant = Color(0xFFE7E0EC)
+private val mdOnSurfaceVariant = Color(0xFF49454F)
+private val mdSurfaceContainer = Color(0xFFF5EFF7)
+private val mdOutline = Color(0xFF79747E)
+private val mdOutlineVariant = Color(0xFFCAC4D0)
+private val mdInverseSurface = Color(0xFF313033)
+private val mdInverseOnSurface = Color(0xFFF4EFF4)
+private val mdInversePrimary = Color(0xFFD0BCFF)
+private val mdText = Color(0xFF1C1B1F)
+
+private val vPrimary = Color(0xFF2979FF)
+private val vPrimaryOn = Color(0xFFFFFFFF)
+private val vSuccess = Color(0xFF00C853)
+private val vSuccessOn = Color(0xFFFFFFFF)
+private val vWarning = Color(0xFFFF9100)
+private val vWarningOn = Color(0xFFFFFFFF)
+private val vError = Color(0xFFD50000)
+private val vErrorOn = Color(0xFFFFFFFF)
+private val vInfo = Color(0xFF00B8D4)
+private val vInfoOn = Color(0xFFFFFFFF)
+private val vTertiary = Color(0xFFF500A1)
+private val vTertiaryOn = Color(0xFFFFFFFF)
 
 object FunKeyScreen : Screen {
     @Composable
@@ -121,8 +142,10 @@ object FunKeyScreen : Screen {
             if (isTimerRunning) audioPlayer.play() else audioPlayer.stop()
         }
 
-        Surface(color = mdBackground) {
+        Surface(modifier = Modifier.fillMaxSize()) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                GameHomeOverlay(navigator = navigator)
+
                 val isCompactHeight = maxHeight < 720.dp
                 val contentSpacing = if (isCompactHeight) 12.dp else 16.dp
                 val queueWeight = if (isCompactHeight) 0.28f else 0.24f
@@ -225,27 +248,11 @@ object FunKeyScreen : Screen {
                         }
                     }
                 }
-
-                IconButton(
-                    onClick = { navigator.pop() },
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp)
-                        .clip(MaterialTheme.shapes.small)
-                        .background(mdPrimary)
-                        .size(48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Home,
-                        contentDescription = "Back to home",
-                        tint = Color.White
-                    )
-                }
             }
         }
 
         if (showAddDialog) {
-            AddParticipantDialog(
+            FunKeyAddParticipantDialog(
                 onDismiss = { showAddDialog = false },
                 onAdd = { handler, dog, utn ->
                     screenModel.addParticipant(handler, dog, utn)
@@ -254,23 +261,6 @@ object FunKeyScreen : Screen {
             )
         }
     }
-}
-
-private object FunKeyColors {
-    val mdPrimary = Color(0xFF6750A4)
-    val mdPrimaryContainer = Color(0xFFEADDFF)
-    val mdBackground = Color(0xFFFFFBFE)
-    val mdSurface = Color(0xFFFFFBFE)
-    val mdSurfaceContainer = Color(0xFFF5EFF7)
-    val mdOutline = Color(0xFF79747E)
-    val mdOutlineVariant = Color(0xFFE7E0EC)
-    val mdText = Color(0xFF1C1B1F)
-    val vPrimary = Color(0xFF2979FF)
-    val vPrimaryOn = Color(0xFFFFFFFF)
-    val vSuccess = Color(0xFF00C853)
-    val vSuccessOn = Color(0xFFFFFFFF)
-    val vWarning = Color(0xFFFF9100)
-    val vWarningOn = Color(0xFF442800)
 }
 
 @Composable
@@ -613,7 +603,7 @@ private fun SidebarButton(
 }
 
 @Composable
-private fun AddParticipantDialog(onDismiss: () -> Unit, onAdd: (String, String, String) -> Unit) {
+private fun FunKeyAddParticipantDialog(onDismiss: () -> Unit, onAdd: (String, String, String) -> Unit) {
     var handler by remember { mutableStateOf("") }
     var dog by remember { mutableStateOf("") }
     var utn by remember { mutableStateOf("") }

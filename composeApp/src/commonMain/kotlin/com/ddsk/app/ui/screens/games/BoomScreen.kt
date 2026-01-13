@@ -43,8 +43,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.rememberDataStore
+import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.screens.games.ui.ButtonPalette
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
 
@@ -54,11 +58,9 @@ private val boomPink = Color(0xFFF500A1)
 private val disabledBackground = Color(0xFFF1F1F1)
 private val disabledContent = Color(0xFF222222)
 
-// K2 can be stricter about file-private visibility when used from other top-level initializers.
-// Keep this file-local, but make it non-private to avoid 'Cannot access ... it is private in file'.
-data class ButtonPalette(val background: Color, val content: Color)
-
-private val scoringBasePalette = mapOf(
+// K2 can be stricter about file-private visibility; expose this within the module so other screens can reuse it safely.
+// Explicit types help K2 inference here.
+private val scoringBasePalette: Map<BoomScoringButton, ButtonPalette> = mapOf(
     BoomScoringButton.One to ButtonPalette(Color(0xFF2979FF), Color.White),
     BoomScoringButton.TwoA to ButtonPalette(Color(0xFF00B8D4), Color.White),
     BoomScoringButton.TwoB to ButtonPalette(Color(0xFF00B8D4), Color.White),
@@ -69,7 +71,11 @@ private val scoringBasePalette = mapOf(
     BoomScoringButton.ThirtyFive to ButtonPalette(Color(0xFFD50000), Color.White)
 )
 
-private fun scoringPaletteFor(button: BoomScoringButton, clicked: Boolean, enabled: Boolean): ButtonPalette {
+private fun scoringPaletteFor(
+    button: BoomScoringButton,
+    clicked: Boolean,
+    enabled: Boolean
+): ButtonPalette {
     return when {
         clicked -> ButtonPalette(successGreen, Color.White)
         enabled -> scoringBasePalette[button] ?: ButtonPalette(Color(0xFF2979FF), Color.White)
@@ -80,6 +86,7 @@ private fun scoringPaletteFor(button: BoomScoringButton, clicked: Boolean, enabl
 object BoomScreen : Screen {
     @Composable
     override fun Content() {
+        val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { BoomScreenModel() }
         val dataStore = rememberDataStore()
         LaunchedEffect(Unit) {
@@ -115,6 +122,7 @@ object BoomScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize()) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                GameHomeOverlay(navigator = navigator)
                 val columnSpacing = 16.dp
                 Row(
                     modifier = Modifier
@@ -236,7 +244,6 @@ private fun BoomGrid(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colors.surface)
                     .padding(horizontal = horizontalPadding, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(interCellSpacing)
             ) {
@@ -465,6 +472,5 @@ private fun gridCellContent(row: Int, col: Int): GridCellContent = when {
 
 private sealed interface BoomDialogState {
     data object None : BoomDialogState
-    data object Import : BoomDialogState
     data object Export : BoomDialogState
 }

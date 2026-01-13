@@ -1,12 +1,10 @@
 package com.ddsk.app.ui.screens.games
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -28,7 +26,6 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
-
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,7 +36,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,15 +44,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.rememberDataStore
+import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
 
-private val successGreen = Color(0xFF00C853)
-private val warningOrange = Color(0xFFFF9100)
-private val boomPink = Color(0xFFF500A1) // Keeping BoomPink for consistency or distinct actions
 // Palette from original file
 private object FourWayPalette {
     val primary = Color(0xFF6750A4)
@@ -68,14 +63,16 @@ private object FourWayPalette {
     val onInfo = Color.White
     val error = Color(0xFFD50000)
     val surfaceContainer = Color(0xFFF5EFF7)
-    val onSurface = Color(0xFF1C1B1F)
-    val onSurfaceVariant = Color(0xFF49454F)
-    val outlineVariant = Color(0xFFCAC4D0)
 }
 
 object FourWayPlayScreen : Screen {
+    // ...
+
+    // Unused colors removed
+
     @Composable
     override fun Content() {
+        val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { FourWayPlayScreenModel() }
         val dataStore = rememberDataStore()
         LaunchedEffect(Unit) {
@@ -86,7 +83,6 @@ object FourWayPlayScreen : Screen {
         val misses by screenModel.misses.collectAsState()
 
         var timerRunning by remember { mutableStateOf(false) }
-        var secondsRemaining by remember { mutableStateOf(60) } // Simple local timer for now to match prev implementation, or could be moved to model
 
         val participants by screenModel.participants.collectAsState()
         val fieldFlipped by screenModel.fieldFlipped.collectAsState()
@@ -128,6 +124,7 @@ object FourWayPlayScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize()) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                GameHomeOverlay(navigator = navigator)
                 val columnSpacing = 16.dp
                 Row(
                     modifier = Modifier
@@ -180,11 +177,7 @@ object FourWayPlayScreen : Screen {
                          TimerCard(
                              timerRunning = timerRunning,
                              modifier = Modifier.fillMaxWidth(),
-                             onStartStop = { timerRunning = !timerRunning },
-                             onReset = {
-                                 timerRunning = false
-                                 // Reset timer logic if it involved actual time tracking
-                             }
+                             onStartStop = { timerRunning = !timerRunning }
                          )
 
                          ParticipantQueueCard(
@@ -458,7 +451,7 @@ private fun RowScope.ControlActionButton(
 }
 
 @Composable
-private fun TimerCard(timerRunning: Boolean, modifier: Modifier = Modifier, onStartStop: () -> Unit, onReset: () -> Unit) {
+private fun TimerCard(timerRunning: Boolean, modifier: Modifier = Modifier, onStartStop: () -> Unit) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = modifier) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(text = "Timer", style = MaterialTheme.typography.h6)

@@ -48,7 +48,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
-import com.ddsk.app.persistence.rememberDataStore
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
+import com.ddsk.app.persistence.*
+import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
@@ -58,6 +61,7 @@ import kotlinx.datetime.toLocalDateTime
 object FireballScreen : Screen {
     @Composable
     override fun Content() {
+        val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { FireballScreenModel() }
         val dataStore = rememberDataStore()
         LaunchedEffect(Unit) {
@@ -171,109 +175,114 @@ object FireballScreen : Screen {
         }
 
         Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                HeaderRow(
-                    timerRunning = isTimerRunning,
-                    secondsRemaining = timerSecondsRemaining,
-                    onTimerToggle = {
-                        if (isTimerRunning) screenModel.stopRoundTimer() else screenModel.startRoundTimer(64)
-                    },
-                    activeParticipant = activeParticipant,
-                    totalScore = totalScore,
-                    boardScore = currentBoardScore,
-                    onAllRollers = screenModel::toggleAllRollers,
-                    allRollers = allRollersActive,
-                )
+            BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                // Home button overlay
+                GameHomeOverlay(navigator = navigator)
 
-                Spacer(Modifier.height(16.dp))
+                Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    HeaderRow(
+                        timerRunning = isTimerRunning,
+                        secondsRemaining = timerSecondsRemaining,
+                        onTimerToggle = {
+                            if (isTimerRunning) screenModel.stopRoundTimer() else screenModel.startRoundTimer(64)
+                        },
+                        activeParticipant = activeParticipant,
+                        totalScore = totalScore,
+                        boardScore = currentBoardScore,
+                        onAllRollers = screenModel::toggleAllRollers,
+                        allRollers = allRollersActive,
+                    )
 
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val spacing = 12.dp
-                    val sidebarWidth = if (sidebarCollapsed) 68.dp else 190.dp
-                    val participantWidth = 220.dp
-                    val minFieldWidth = 260.dp
-                    val availableFieldWidth = (maxWidth - sidebarWidth - participantWidth - spacing * 2).coerceAtLeast(minFieldWidth)
-                    val fieldHeight = (availableFieldWidth / 1.8f).coerceAtLeast(340.dp)
+                    Spacer(Modifier.height(16.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(spacing),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        SidebarColumn(
-                            collapsed = sidebarCollapsed,
-                            onToggle = screenModel::toggleSidebar,
-                            onImport = { filePicker.launch() },
-                            onExport = {
-                                scope.launch {
-                                    val templateBytes = assetLoader.load("templates/UDC Fireball Data Entry L1 Div Sort.xlsx")
-                                    if (templateBytes == null) {
-                                        screenModel.sidebarMessage.value = "Template missing: UDC Fireball Data Entry L1 Div Sort.xlsx"
-                                        return@launch
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        val spacing = 12.dp
+                        val sidebarWidth = if (sidebarCollapsed) 68.dp else 190.dp
+                        val participantWidth = 220.dp
+                        val minFieldWidth = 260.dp
+                        val availableFieldWidth = (maxWidth - sidebarWidth - participantWidth - spacing * 2).coerceAtLeast(minFieldWidth)
+                        val fieldHeight = (availableFieldWidth / 1.8f).coerceAtLeast(340.dp)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(spacing),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            SidebarColumn(
+                                collapsed = sidebarCollapsed,
+                                onToggle = screenModel::toggleSidebar,
+                                onImport = { filePicker.launch() },
+                                onExport = {
+                                    scope.launch {
+                                        val templateBytes = assetLoader.load("templates/UDC Fireball Data Entry L1 Div Sort.xlsx")
+                                        if (templateBytes == null) {
+                                            screenModel.sidebarMessage.value = "Template missing: UDC Fireball Data Entry L1 Div Sort.xlsx"
+                                            return@launch
+                                        }
+
+                                        // React behavior: export committed participant totals (completed rounds).
+                                        // Active participant may have in-progress board state and should not be included unless
+                                        // the user has advanced with Next (which commits and adds to completedParticipants).
+                                        val participants = completedParticipants
+
+                                        if (participants.isEmpty()) {
+                                            screenModel.sidebarMessage.value = "Export: no completed participants yet (press Next to commit a round)"
+                                            return@launch
+                                        }
+
+                                        val firstNonZero = participants.firstOrNull {
+                                            it.totalPoints != 0 || it.nonFireballPoints != 0 || it.fireballPoints != 0 || (it.highestZone ?: 0) != 0
+                                        }
+                                        screenModel.sidebarMessage.value = if (firstNonZero == null) {
+                                            "Export debug: completed participants still look zero (count=${participants.size})"
+                                        } else {
+                                            "Export debug (completed): ${firstNonZero.handler}/${firstNonZero.dog} NF=${firstNonZero.nonFireballPoints} FB=${firstNonZero.fireballPoints} SS=${firstNonZero.sweetSpotBonus} HZ=${firstNonZero.highestZone ?: 0} TOT=${firstNonZero.totalPoints}"
+                                        }
+
+                                        val exported = generateFireballXlsx(participants, templateBytes)
+                                        if (exported.isEmpty()) {
+                                            screenModel.sidebarMessage.value = "Export failed"
+                                            return@launch
+                                        }
+
+                                        val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                        val stamp = fireballTimestamp(now)
+
+                                        fileExporter.save("Fireball_Scores_$stamp.xlsx", exported)
+                                        screenModel.sidebarMessage.value = "Exported Fireball_Scores_$stamp.xlsx"
                                     }
+                                },
+                                onHelp = screenModel::openHelp,
+                                onClearBoard = screenModel::clearBoard,
+                                onResetGame = screenModel::resetGame,
+                                onFlipField = screenModel::toggleFieldOrientation,
+                                onToggleFireball = screenModel::toggleFireball,
+                                onToggleSweetSpot = screenModel::toggleManualSweetSpot,
+                                onNext = screenModel::nextParticipant,
+                                onSkip = screenModel::skipParticipant,
+                                onAddTeam = { screenModel.addParticipant(FireballParticipant("New", "Dog", "UTN")) },
+                                collapsedMessage = sidebarMessage,
+                                isFireballActive = isFireballActive,
+                                sweetSpotActive = sweetSpotBonusAwarded,
+                                remainingCount = remainingParticipants.size,
+                                onCollapseRequested = screenModel::toggleSidebar
+                            )
 
-                                    // React behavior: export committed participant totals (completed rounds).
-                                    // Active participant may have in-progress board state and should not be included unless
-                                    // the user has advanced with Next (which commits and adds to completedParticipants).
-                                    val participants = completedParticipants
+                            ParticipantPanel(
+                                remaining = remainingParticipants,
+                                height = fieldHeight,
+                            )
 
-                                    if (participants.isEmpty()) {
-                                        screenModel.sidebarMessage.value = "Export: no completed participants yet (press Next to commit a round)"
-                                        return@launch
-                                    }
-
-                                    val firstNonZero = participants.firstOrNull {
-                                        it.totalPoints != 0 || it.nonFireballPoints != 0 || it.fireballPoints != 0 || (it.highestZone ?: 0) != 0
-                                    }
-                                    screenModel.sidebarMessage.value = if (firstNonZero == null) {
-                                        "Export debug: completed participants still look zero (count=${participants.size})"
-                                    } else {
-                                        "Export debug (completed): ${firstNonZero.handler}/${firstNonZero.dog} NF=${firstNonZero.nonFireballPoints} FB=${firstNonZero.fireballPoints} SS=${firstNonZero.sweetSpotBonus} HZ=${firstNonZero.highestZone ?: 0} TOT=${firstNonZero.totalPoints}"
-                                    }
-
-                                    val exported = generateFireballXlsx(participants, templateBytes)
-                                    if (exported.isEmpty()) {
-                                        screenModel.sidebarMessage.value = "Export failed"
-                                        return@launch
-                                    }
-
-                                    val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-                                    val stamp = fireballTimestamp(now)
-
-                                    fileExporter.save("Fireball_Scores_$stamp.xlsx", exported)
-                                    screenModel.sidebarMessage.value = "Exported Fireball_Scores_$stamp.xlsx"
-                                }
-                            },
-                            onHelp = screenModel::openHelp,
-                            onClearBoard = screenModel::clearBoard,
-                            onResetGame = screenModel::resetGame,
-                            onFlipField = screenModel::toggleFieldOrientation,
-                            onToggleFireball = screenModel::toggleFireball,
-                            onToggleSweetSpot = screenModel::toggleManualSweetSpot,
-                            onNext = screenModel::nextParticipant,
-                            onSkip = screenModel::skipParticipant,
-                            onAddTeam = { screenModel.addParticipant(FireballParticipant("New", "Dog", "UTN")) },
-                            collapsedMessage = sidebarMessage,
-                            isFireballActive = isFireballActive,
-                            sweetSpotActive = sweetSpotBonusAwarded,
-                            remainingCount = remainingParticipants.size,
-                            onCollapseRequested = screenModel::toggleSidebar
-                        )
-
-                        ParticipantPanel(
-                            remaining = remainingParticipants,
-                            height = fieldHeight,
-                        )
-
-                        FieldAndControls(
-                            screenModel = screenModel,
-                            isFieldFlipped = isFieldFlipped,
-                            isFireballActive = isFireballActive,
-                            sweetSpotActive = sweetSpotBonusAwarded,
-                            modifier = Modifier
-                                .width(availableFieldWidth)
-                                .height(fieldHeight)
-                        )
+                            FieldAndControls(
+                                screenModel = screenModel,
+                                isFieldFlipped = isFieldFlipped,
+                                isFireballActive = isFireballActive,
+                                sweetSpotActive = sweetSpotBonusAwarded,
+                                modifier = Modifier
+                                    .width(availableFieldWidth)
+                                    .height(fieldHeight)
+                            )
+                        }
                     }
                 }
             }

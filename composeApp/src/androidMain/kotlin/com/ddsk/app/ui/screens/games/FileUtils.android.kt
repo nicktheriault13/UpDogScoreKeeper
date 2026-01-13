@@ -16,10 +16,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import java.util.Locale
 
-// Force consistent symbol resolution for expect/actual matching under K2
-import com.ddsk.app.ui.screens.games.FarOutParticipant
-import com.ddsk.app.ui.screens.games.GreedyScreenModel
-import com.ddsk.app.ui.screens.games.TimeWarpParticipant
 
 @Composable
 actual fun rememberFileExporter(): FileExporter {
@@ -192,6 +188,11 @@ actual fun generateFarOutXlsx(participants: List<FarOutParticipant>, templateByt
 
             // Column M (12): AllRollers (Y/N)
             row.createCell(12).setCellValue(if (p.allRollers) "Y" else "N")
+
+            // Column P (15): Height Division
+            if (p.heightDivision.isNotEmpty()) {
+                row.createCell(15).setCellValue(p.heightDivision)
+            }
         }
 
         val bos = ByteArrayOutputStream()

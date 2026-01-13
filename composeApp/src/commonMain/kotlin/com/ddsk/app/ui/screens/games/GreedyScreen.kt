@@ -33,32 +33,37 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
+import com.ddsk.app.media.rememberAudioPlayer
+import com.ddsk.app.persistence.rememberDataStore
+import com.ddsk.app.persistence.*
+import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.screen.Screen
-import com.ddsk.app.media.rememberAudioPlayer
-import com.ddsk.app.persistence.rememberDataStore
-import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import com.ddsk.app.ui.theme.Palette
 
 private val successGreen = Color(0xFF00C853)
 private val warningOrange = Color(0xFFFF9100)
 private val greedyPink = Color(0xFFF500A1)
 private val infoBlue = Color(0xFF2196F3)
-private val surfaceContainer = Color(0xFFF5EFF7)
 private val onSurfaceVariant = Color(0xFF49454F)
 
 object GreedyScreen : Screen {
     @Composable
     override fun Content() {
+        val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { GreedyScreenModel() }
         val dataStore = rememberDataStore()
         LaunchedEffect(Unit) {
@@ -74,7 +79,6 @@ object GreedyScreen : Screen {
 
         val activeButtons by screenModel.activeButtons.collectAsState()
         val participants by screenModel.participants.collectAsState()
-        val allParticipants by screenModel.allParticipants.collectAsState()
 
         val assetLoader = rememberAssetLoader()
         val exporter = rememberFileExporter()
@@ -112,93 +116,93 @@ object GreedyScreen : Screen {
             if (timerRunning.value) audioPlayer.play() else audioPlayer.stop()
         }
 
-        Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
-            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                val columnSpacing = 16.dp
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(columnSpacing),
-                    horizontalArrangement = Arrangement.spacedBy(columnSpacing)
-                ) {
-                    // Left: scoring + controls
-                    Column(
-                        modifier = Modifier
-                            .weight(2f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
-                    ) {
-                        GreedyScoreSummaryCard(
-                            handlerDog = participants.firstOrNull()?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
-                            throwZone = throwZone,
-                            score = score,
-                            misses = misses,
-                            sweetSpotBonus = sweetSpotBonus,
-                            allRollers = allRollersEnabled
-                        )
+        Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                GameHomeOverlay(navigator = navigator)
 
-                        Box(modifier = Modifier.weight(1f)) {
-                            GreedyBoard(
-                                rotationDegrees = rotationDegrees,
-                                activeButtons = activeButtons,
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val columnSpacing = 16.dp
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(columnSpacing),
+                        horizontalArrangement = Arrangement.spacedBy(columnSpacing)
+                    ) {
+                        // Left: scoring + controls
+                        Column(
+                            modifier = Modifier
+                                .weight(2f)
+                                .fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                        ) {
+                            GreedyScoreSummaryCard(
+                                handlerDog = participants.firstOrNull()?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
                                 throwZone = throwZone,
-                                onPress = screenModel::handleButtonPress,
-                                modifier = Modifier.fillMaxSize()
+                                score = score,
+                                misses = misses,
+                                sweetSpotBonus = sweetSpotBonus,
+                                allRollers = allRollersEnabled
+                            )
+
+                            Box(modifier = Modifier.weight(1f)) {
+                                GreedyBoard(
+                                    rotationDegrees = rotationDegrees,
+                                    activeButtons = activeButtons,
+                                    throwZone = throwZone,
+                                    onPress = screenModel::handleButtonPress,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+
+                            GreedyControlRow(
+                                throwZone = throwZone,
+                                anySquareClicked = activeButtons.isNotEmpty(),
+                                timerRunning = timerRunning.value,
+                                onToggleTimer = { timerRunning.value = !timerRunning.value },
+                                onUndo = screenModel::undo,
+                                onNextThrowZoneClockwise = { screenModel.nextThrowZone(clockwise = true) },
+                                onNextThrowZoneCounterClockwise = { screenModel.nextThrowZone(clockwise = false) },
+                                clockwiseDisabled = screenModel.isClockwiseDisabled.collectAsState().value,
+                                counterClockwiseDisabled = screenModel.isCounterClockwiseDisabled.collectAsState().value,
+                                rotateStartingVisible = screenModel.isRotateStartingZoneVisible.collectAsState().value,
+                                onRotateStartingZone = screenModel::rotateStartingZone,
+                                onSweetSpotBonus = { showSweetSpotBonusDialog = true },
+                                sweetSpotBonusEntered = sweetSpotBonus > 0,
+                                onMissPlus = screenModel::incrementMisses,
+                                onAllRollersToggle = screenModel::toggleAllRollers,
+                                allRollersEnabled = allRollersEnabled,
+                                onReset = screenModel::reset
                             )
                         }
 
-                        GreedyControlRow(
-                            throwZone = throwZone,
-                            anySquareClicked = activeButtons.isNotEmpty(),
-                            timerRunning = timerRunning.value,
-                            onToggleTimer = { timerRunning.value = !timerRunning.value },
-                            onUndo = screenModel::undo,
-                            onNextThrowZoneClockwise = { screenModel.nextThrowZone(clockwise = true) },
-                            onNextThrowZoneCounterClockwise = { screenModel.nextThrowZone(clockwise = false) },
-                            clockwiseDisabled = screenModel.isClockwiseDisabled.collectAsState().value,
-                            counterClockwiseDisabled = screenModel.isCounterClockwiseDisabled.collectAsState().value,
-                            rotateStartingVisible = screenModel.isRotateStartingZoneVisible.collectAsState().value,
-                            onRotateStartingZone = screenModel::rotateStartingZone,
-                            onSweetSpotBonus = { showSweetSpotBonusDialog = true },
-                            sweetSpotBonusEntered = sweetSpotBonus > 0,
-                            onMissPlus = screenModel::incrementMisses,
-                            onAllRollersToggle = screenModel::toggleAllRollers,
-                            allRollersEnabled = allRollersEnabled,
-                            onReset = screenModel::reset
-                        )
-                    }
+                        // Right: queue + import/export (Boom-style)
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                        ) {
 
-                    // Right: queue + import/export (Boom-style)
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
-                    ) {
-                        GreedyQueueCard(
-                            queue = participants,
-                            modifier = Modifier.fillMaxWidth().weight(1f)
-                        )
-
-                        GreedyImportExportCard(
-                            onImportClick = { filePicker.launch() },
-                            onExportClick = {
-                                val template = assetLoader.load("templates/UDC Greedy Data Entry L1 Div Sort.xlsx")
-                                if (template != null) {
-                                    val bytes = screenModel.exportParticipantsAsXlsx(template)
-                                    exporter.save("Greedy_Scores.xlsx", bytes)
-                                }
-                            },
-                            onExportCsvClick = {
-                                val csv = screenModel.exportParticipantsAsCsv()
-                                scope.launch { saveJsonFileWithPicker("Greedy_Scores.csv", csv) }
-                            },
-                            onAddTeamClick = { showAddParticipant = true },
-                            onClearClick = screenModel::clearParticipants,
-                            onPreviousParticipant = screenModel::previousParticipant,
-                            onSkipParticipant = screenModel::skipParticipant,
-                            onNextParticipant = screenModel::nextParticipant
-                        )
+                            GreedyImportExportCard(
+                                onImportClick = { filePicker.launch() },
+                                onExportClick = {
+                                    val template = assetLoader.load("templates/UDC Greedy Data Entry L1 Div Sort.xlsx")
+                                    if (template != null) {
+                                        val bytes = screenModel.exportParticipantsAsXlsx(template)
+                                        exporter.save("Greedy_Scores.xlsx", bytes)
+                                    }
+                                },
+                                onExportCsvClick = {
+                                    val csv = screenModel.exportParticipantsAsCsv()
+                                    scope.launch { saveJsonFileWithPicker("Greedy_Scores.csv", csv) }
+                                },
+                                onAddTeamClick = { showAddParticipant = true },
+                                onClearClick = screenModel::clearParticipants,
+                                onPreviousParticipant = screenModel::previousParticipant,
+                                onSkipParticipant = screenModel::skipParticipant,
+                                onNextParticipant = screenModel::nextParticipant
+                            )
+                        }
                     }
                 }
             }
@@ -366,7 +370,7 @@ private fun GreedyBoard(
                     .size(gridSize)
                     .graphicsLayer {
                         rotationZ = rotationDegrees.toFloat()
-                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0.5f)
+                        transformOrigin = TransformOrigin(0.5f, 0.5f)
                     }
             ) {
                 // Square (3x3)

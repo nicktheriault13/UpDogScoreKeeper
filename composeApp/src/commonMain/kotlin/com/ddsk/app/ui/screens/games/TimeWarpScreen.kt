@@ -41,6 +41,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.TextField
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -50,9 +51,11 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
-import com.ddsk.app.persistence.rememberDataStore
+import com.ddsk.app.persistence.*
+import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
+import kotlinx.coroutines.launch
 
 object TimeWarpScreen : Screen {
     @Composable
@@ -121,6 +124,8 @@ object TimeWarpScreen : Screen {
 
         Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize()) {
+                GameHomeOverlay(navigator = navigator)
+
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -206,13 +211,6 @@ object TimeWarpScreen : Screen {
                             }
                         }
                     }
-                }
-
-                IconButton(
-                    onClick = { navigator.pop() },
-                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
-                ) {
-                    Icon(Icons.Filled.Home, "Home", tint = Color.Gray)
                 }
             }
         }

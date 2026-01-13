@@ -52,8 +52,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
@@ -62,12 +62,13 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.logging.rememberGameLogger
 import com.ddsk.app.media.rememberAudioPlayer
-import com.ddsk.app.persistence.rememberDataStore
+import com.ddsk.app.persistence.*
+import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 object FarOutScreen : Screen {
 
@@ -119,134 +120,138 @@ object FarOutScreen : Screen {
         }
 
         Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                FarOutHeader(
-                    activeName = activeParticipant?.displayName().orEmpty().ifBlank { "No team loaded" },
-                    score = state.score,
-                    timer = state.timerDisplay,
-                    onStartTimer = { 
-                        logButtonPress("Start Timer")
-                        screenModel.startTimer()
-                    },
-                    onPauseTimer = { 
-                        logButtonPress("Pause Timer")
-                        screenModel.pauseOrResumeTimer()
-                    },
-                    onStopTimer = { 
-                        logButtonPress("Stop Timer")
-                        screenModel.stopTimer()
-                    },
-                    onBack = {
-                        logButtonPress("Back")
-                        navigator.pop()
-                    }
-                )
+            Box(modifier = Modifier.fillMaxSize()) {
+                GameHomeOverlay(navigator = navigator)
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    FarOutSidebar(
-                        timerLabel = state.timerDisplay.secondsRemaining,
-                        onImport = { 
-                            logButtonPress("Import")
-                            filePicker.launch()
+                Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                    FarOutHeader(
+                        activeName = activeParticipant?.displayName().orEmpty().ifBlank { "No team loaded" },
+                        score = state.score,
+                        timer = state.timerDisplay,
+                        onStartTimer = {
+                            logButtonPress("Start Timer")
+                            screenModel.startTimer()
                         },
-                        onExport = {
-                            scope.launch {
-                                logButtonPress("Export")
-                                val templatePath = "templates/UDC FarOut Data Entry L1 Div Sort 1-2025.xlsm"
-                                val templateBytes = try {
-                                    assetLoader.load(templatePath)
-                                } catch (e: Exception) {
-                                    null
-                                }
-
-                                val result = try {
-                                    screenModel.exportParticipantsAsXlsx(templateBytes)
-                                } catch (e: Exception) {
-                                    gameLogger.log("Export exception: ${e.message}")
-                                    null
-                                }
-
-                                if (result != null) {
-                                    fileExporter.save(result.fileName, result.data)
-                                    gameLogger.log("Export initiated: ${result.fileName}")
-                                } else {
-                                    gameLogger.log("Export failed: missing template or data generation error")
-                                }
-                            }
+                        onPauseTimer = {
+                            logButtonPress("Pause Timer")
+                            screenModel.pauseOrResumeTimer()
                         },
-                        onExportLog = {
-                            scope.launch {
-                                logButtonPress("Export Log")
-                                val logContent = gameLogger.getLogContents()
-                                val json = Json.encodeToString(logContent)
-                                fileExporter.save("FarOutLog.json", json.encodeToByteArray())
-                            }
+                        onStopTimer = {
+                            logButtonPress("Stop Timer")
+                            screenModel.stopTimer()
                         },
-                        onAdd = { 
-                            logButtonPress("Add Team")
-                            screenModel.showAddParticipant(true)
-                        },
-                        onHelp = { 
-                            logButtonPress("Help")
-                            screenModel.toggleHelp(true)
-                        },
-                        onShowTeams = { 
-                            logButtonPress("Show Teams")
-                            screenModel.showTeamModal(true)
-                        },
-                        onNext = { 
-                            logButtonPress("Next")
-                            screenModel.nextParticipant(autoExport = true)
-                        },
-                        onPrev = { 
-                            logButtonPress("Previous")
-                            screenModel::previousParticipant
-                        },
-                        onSkip = { 
-                            logButtonPress("Skip")
-                            screenModel::skipParticipant
-                        },
-                        onUndo = { 
-                            logButtonPress("Undo")
-                            screenModel::undo
-                        },
-                        onResetRound = { 
-                            logButtonPress("Reset Round")
-                            screenModel::resetRound
-                        },
-                        onClearParticipants = { 
-                            logButtonPress("Clear Participants")
-                            screenModel.showClearPrompt(true)
-                        },
-                        undoEnabled = state.undoAvailable,
-                        onViewLog = { 
-                            logButtonPress("View Log")
-                            showLogDialog = true
+                        onBack = {
+                            logButtonPress("Back")
+                            navigator.pop()
                         }
                     )
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            ParticipantsPanel(
-                                remainingTeams = remainingTeams,
-                                activeParticipant = activeParticipant,
-                                modifier = Modifier.weight(0.35f)
-                            )
-                            ThrowsCard(
-                                state = state,
-                                onValueChange = screenModel::updateThrow,
-                                onMissToggle = screenModel::toggleMiss,
-                                onDeclinedToggle = screenModel::toggleDeclined,
-                                onAllRollers = screenModel::toggleAllRollers,
-                                onResetRound = screenModel::resetRound,
-                                modifier = Modifier.weight(0.65f),
-                                log = { logButtonPress(it) }
-                            )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        FarOutSidebar(
+                            timerLabel = state.timerDisplay.secondsRemaining,
+                            onImport = {
+                                logButtonPress("Import")
+                                filePicker.launch()
+                            },
+                            onExport = {
+                                scope.launch {
+                                    logButtonPress("Export")
+                                    val templatePath = "templates/UDC FarOut Data Entry L1 Div Sort 1-2025.xlsm"
+                                    val templateBytes = try {
+                                        assetLoader.load(templatePath)
+                                    } catch (e: Exception) {
+                                        null
+                                    }
+
+                                    val result = try {
+                                        screenModel.exportParticipantsAsXlsx(templateBytes)
+                                    } catch (e: Exception) {
+                                        gameLogger.log("Export exception: ${e.message}")
+                                        null
+                                    }
+
+                                    if (result != null) {
+                                        fileExporter.save(result.fileName, result.data)
+                                        gameLogger.log("Export initiated: ${result.fileName}")
+                                    } else {
+                                        gameLogger.log("Export failed: missing template or data generation error")
+                                    }
+                                }
+                            },
+                            onExportLog = {
+                                scope.launch {
+                                    logButtonPress("Export Log")
+                                    val logContent = gameLogger.getLogContents()
+                                    val json = Json.encodeToString(logContent)
+                                    fileExporter.save("FarOutLog.json", json.encodeToByteArray())
+                                }
+                            },
+                            onAdd = {
+                                logButtonPress("Add Team")
+                                screenModel.showAddParticipant(true)
+                            },
+                            onHelp = {
+                                logButtonPress("Help")
+                                screenModel.toggleHelp(true)
+                            },
+                            onShowTeams = {
+                                logButtonPress("Show Teams")
+                                screenModel.showTeamModal(true)
+                            },
+                            onNext = {
+                                logButtonPress("Next")
+                                screenModel.nextParticipant(autoExport = true)
+                            },
+                            onPrev = {
+                                logButtonPress("Previous")
+                                screenModel.previousParticipant()
+                            },
+                            onSkip = {
+                                logButtonPress("Skip")
+                                screenModel.skipParticipant()
+                            },
+                            onUndo = {
+                                logButtonPress("Undo")
+                                screenModel.undo()
+                            },
+                            onResetRound = {
+                                logButtonPress("Reset Round")
+                                screenModel.resetRound()
+                            },
+                            onClearParticipants = {
+                                logButtonPress("Clear Participants")
+                                screenModel.showClearPrompt(true)
+                            },
+                            onViewLog = {
+                                logButtonPress("View Log")
+                                showLogDialog = true
+                            },
+                            undoEnabled = state.undoAvailable
+                        )
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                ParticipantsPanel(
+                                    remainingTeams = remainingTeams,
+                                    activeParticipant = activeParticipant,
+                                    modifier = Modifier.weight(0.35f)
+                                )
+                                ThrowsCard(
+                                    state = state,
+                                    onValueChange = screenModel::updateThrow,
+                                    onMissToggle = screenModel::toggleMiss,
+                                    onDeclinedToggle = screenModel::toggleDeclined,
+                                    onAllRollers = screenModel::toggleAllRollers,
+                                    onResetRound = screenModel::resetRound,
+                                    modifier = Modifier.weight(0.65f),
+                                    log = { logButtonPress(it) }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            LogCard(entries = state.logEntries.take(6))
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        LogCard(entries = state.logEntries.take(6))
                     }
                 }
             }
@@ -290,11 +295,14 @@ object FarOutScreen : Screen {
         }
 
         if (textPreview != null) {
-            TextPreviewDialog(
-                title = textPreview!!.title,
-                payload = textPreview!!.payload,
-                onDismiss = { textPreview = null }
-            )
+            val preview = textPreview
+            if (preview != null) {
+                TextPreviewDialog(
+                    title = preview.title,
+                    payload = preview.payload,
+                    onDismiss = { textPreview = null }
+                )
+            }
         }
 
         if (showLogDialog) {
@@ -804,23 +812,6 @@ private fun ConfirmDialog(
             }
         } else null
     )
-}
-
-fun getTimerAssetForGame(gameName: String): String {
-    return when (gameName) {
-        "Far Out" -> "files/90Seconds_FS original CE.mp3"
-        "Time Warp" -> "files/60Seconds_TW original CE.mp3"
-        "FriVgility" -> "files/60Seconds_TW original CE.mp3" // Assuming FriVgility also uses 60s
-        "FourWayPlay" -> "files/60Seconds_TW original CE.mp3"
-        "7Up" -> "files/60Seconds_TW original CE.mp3"
-        "Greedy" -> "files/60Seconds_TW original CE.mp3"
-        "Spaced Out" -> "files/60Seconds_TW original CE.mp3"
-        "ThrowNGo" -> "files/60Seconds_TW original CE.mp3"
-        "Boom" -> "files/60Seconds_TW original CE.mp3"
-        "FunKey" -> "files/60Seconds_TW original CE.mp3"
-        "Fireball" -> "files/60Seconds_TW original CE.mp3" // Verify duration if needed
-        else -> "files/60Seconds_TW original CE.mp3"
-    }
 }
 
 private data class TextPreview(val title: String, val payload: String)

@@ -3,6 +3,7 @@ package com.ddsk.app.ui.screens.games
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -105,7 +106,8 @@ class GreedyScreenModel : ScreenModel {
 
     fun initPersistence(store: DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        // Desktop builds don't provide Dispatchers.Main by default.
+        screenModelScope.launch(Dispatchers.Default) {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {

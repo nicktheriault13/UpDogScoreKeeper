@@ -11,12 +11,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.Closeable
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.Clip
 
-class DesktopAudioPlayer(private val fileName: String) : AudioPlayer {
+@Suppress("unused")
+class DesktopAudioPlayer(fileName: String) : AudioPlayer {
+    private val assetPath: String = fileName
     private var clip: Clip? = null
-    private val scope = CoroutineScope(Dispatchers.Main + Job())
+
+    // On desktop, Dispatchers.Main might not be installed. Use Default for polling.
+    private val scope = CoroutineScope(Dispatchers.Default + Job())
     private var timeUpdateJob: Job? = null
 
     private val _currentTime = MutableStateFlow(0)
@@ -30,11 +35,21 @@ class DesktopAudioPlayer(private val fileName: String) : AudioPlayer {
 
     init {
         try {
-            val resource = Thread.currentThread().contextClassLoader.getResource(fileName)
-            val audioInputStream = AudioSystem.getAudioInputStream(resource)
-            clip = AudioSystem.getClip()
-            clip?.open(audioInputStream)
-        } catch (e: Exception) {
+            val resource = Thread.currentThread().contextClassLoader.getResource(assetPath)
+            if (resource != null) {
+                // Ensure the stream is closed to avoid file handle leaks.
+                val audioInputStream = AudioSystem.getAudioInputStream(resource)
+                try {
+                    clip = AudioSystem.getClip().apply { open(audioInputStream) }
+                } finally {
+                    (audioInputStream as? Closeable)?.close()
+                }
+            } else {
+                // If the resource isn't bundled, keep clip null and gracefully no-op.
+                clip = null
+            }
+        } catch (_: Exception) {
+            // Never crash the UI because of missing/bad audio assets.
             clip = null
         }
     }

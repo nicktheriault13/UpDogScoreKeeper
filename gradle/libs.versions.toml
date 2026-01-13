@@ -20,6 +20,8 @@ ktor = "2.3.8"
 firebase-kotlin = "1.11.1"
 kotlinx-serialization = "1.6.2"
 kotlinx-datetime = "0.5.0"
+# Kotlin 1.9.x compatible coroutines (1.10+ is Kotlin 2.1 metadata and breaks KGP 1.9.22)
+kotlinx-coroutines = "1.7.3"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -51,6 +53,8 @@ koin-compose = { module = "io.insert-koin:koin-compose", version.ref = "koin-com
 firebase-auth = { module = "dev.gitlive:firebase-auth", version.ref = "firebase-kotlin" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

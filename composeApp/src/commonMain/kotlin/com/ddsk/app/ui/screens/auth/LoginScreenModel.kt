@@ -3,6 +3,7 @@ package com.ddsk.app.ui.screens.auth
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.auth.AuthService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -36,7 +37,8 @@ class LoginScreenModel(
     }
 
     fun signIn() {
-        screenModelScope.launch {
+        // Desktop builds don't have a Main dispatcher by default. Keep login work off Main.
+        screenModelScope.launch(Dispatchers.Default) {
             _loginState.value = LoginState.Loading
             try {
                 authService.signIn(email.value, password.value)

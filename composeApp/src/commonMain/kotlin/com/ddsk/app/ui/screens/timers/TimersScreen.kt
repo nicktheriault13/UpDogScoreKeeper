@@ -143,7 +143,7 @@ private fun TimersContent(onNavigateHome: () -> Unit) {
             if (playerState != TimerPlayerState.Stopped && currentGame != null) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     NowPlayingCard(
-                        gameName = currentGame!!.name,
+                        gameName = currentGame?.name.orEmpty(),
                         currentTimeMillis = currentTime,
                         durationMillis = duration,
                         playerState = playerState,

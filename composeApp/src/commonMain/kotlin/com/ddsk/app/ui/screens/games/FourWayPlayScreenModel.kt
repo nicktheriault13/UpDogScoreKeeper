@@ -3,15 +3,14 @@ package com.ddsk.app.ui.screens.games
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlin.math.max
 
 class FourWayPlayScreenModel : ScreenModel {
 
@@ -43,7 +42,9 @@ class FourWayPlayScreenModel : ScreenModel {
 
     fun initPersistence(store: DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        // Desktop builds don't provide Dispatchers.Main by default.
+        // Keep persistence IO/deserialization off Main.
+        screenModelScope.launch(Dispatchers.Default) {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {
@@ -60,7 +61,8 @@ class FourWayPlayScreenModel : ScreenModel {
     private fun persistState() {
         val store = dataStore ?: return
         val state = PersistedState(_participants.value, _completed.value)
-        screenModelScope.launch {
+        // Desktop builds don't provide Dispatchers.Main by default.
+        screenModelScope.launch(Dispatchers.Default) {
             try {
                 val json = Json.encodeToString(state)
                 store.save(persistenceKey, json)

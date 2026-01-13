@@ -114,7 +114,9 @@ class FarOutScreenModel(
 
     fun initPersistence(store: com.ddsk.app.persistence.DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        // Desktop builds don't provide Dispatchers.Main by default.
+        // Keep persistence IO/deserialization off Main.
+        screenModelScope.launch(Dispatchers.Default) {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {
@@ -623,4 +625,3 @@ class ConsoleFarOutLogger : FarOutLogger {
 }
 
 const val FAR_OUT_HELP_TEXT = "Far Out — Button functions\n\nThis file documents every interactive button shown on the Far Out screen."
-

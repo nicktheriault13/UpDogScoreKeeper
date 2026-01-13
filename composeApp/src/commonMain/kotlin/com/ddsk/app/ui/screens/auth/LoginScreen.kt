@@ -25,7 +25,6 @@ import cafe.adriel.voyager.koin.getScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.ui.screens.MainScreen
-import org.koin.compose.koinInject
 
 class LoginScreen : Screen {
 
@@ -40,7 +39,9 @@ class LoginScreen : Screen {
 
         LaunchedEffect(loginState) {
             if (loginState is LoginState.Success) {
-                navigator.push(MainScreen())
+                // Replace the whole stack so Login can't be re-shown via back navigation
+                // (and to avoid potential state issues on Desktop).
+                navigator.replaceAll(MainScreen())
             }
         }
 

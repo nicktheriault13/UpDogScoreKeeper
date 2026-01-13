@@ -53,7 +53,8 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
-import com.ddsk.app.persistence.rememberDataStore
+import com.ddsk.app.persistence.*
+import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
@@ -116,62 +117,66 @@ object SpacedOutScreen : Screen {
             }
         }
 
-        Surface(color = MaterialTheme.colors.background) {
-            Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                HeaderRow(
-                    activeName = activeParticipant?.displayName() ?: "No team loaded",
-                    score = score,
-                    timeLeft = timeLeft,
-                    timerRunning = timerRunning,
-                    onTimerToggle = {
-                        if (timerRunning) myModel.stopTimer() else myModel.startTimer()
-                    },
-                    onTimerReset = myModel::resetTimer,
-                    onResetRound = myModel::reset
-                )
+        Surface(modifier = Modifier.fillMaxSize()) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                GameHomeOverlay(navigator = navigator)
 
-                Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Sidebar(
-                        collapsed = sidebarCollapsed.value,
+                Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HeaderRow(
+                        activeName = activeParticipant?.displayName() ?: "No team loaded",
                         score = score,
-                        spacedOut = spacedOutCount,
-                        misses = misses,
-                        ob = ob,
-                        sweetSpotBonusOn = sweetSpotBonusOn,
-                        onToggleCollapse = { sidebarCollapsed.value = !sidebarCollapsed.value },
-                        onMiss = myModel::incrementMisses,
-                        onOb = myModel::incrementOb,
-                        onSweetSpotToggle = myModel::toggleSweetSpotBonus,
-                        onFlipField = myModel::flipField,
-                        onReset = myModel::reset,
-                        onAddTeam = { showAddParticipant = true },
-                        onImport = { filePicker.launch() },
-                        onExport = { exportBuffer = myModel.exportParticipantsAsCsv() },
-                        onExportLog = { logBuffer = myModel.exportLog() },
-                        onNext = myModel::nextParticipant,
-                        onPrev = myModel::previousParticipant,
-                        onSkip = myModel::skipParticipant,
-                        onClearParticipants = myModel::clearParticipants
+                        timeLeft = timeLeft,
+                        timerRunning = timerRunning,
+                        onTimerToggle = {
+                            if (timerRunning) myModel.stopTimer() else myModel.startTimer()
+                        },
+                        onTimerReset = myModel::resetTimer,
+                        onResetRound = myModel::reset
                     )
 
-                    ParticipantList(queue = queue)
+                    Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Sidebar(
+                            collapsed = sidebarCollapsed.value,
+                            score = score,
+                            spacedOut = spacedOutCount,
+                            misses = misses,
+                            ob = ob,
+                            sweetSpotBonusOn = sweetSpotBonusOn,
+                            onToggleCollapse = { sidebarCollapsed.value = !sidebarCollapsed.value },
+                            onMiss = myModel::incrementMisses,
+                            onOb = myModel::incrementOb,
+                            onSweetSpotToggle = myModel::toggleSweetSpotBonus,
+                            onFlipField = myModel::flipField,
+                            onReset = myModel::reset,
+                            onAddTeam = { showAddParticipant = true },
+                            onImport = { filePicker.launch() },
+                            onExport = { exportBuffer = myModel.exportParticipantsAsCsv() },
+                            onExportLog = { logBuffer = myModel.exportLog() },
+                            onNext = myModel::nextParticipant,
+                            onPrev = myModel::previousParticipant,
+                            onSkip = myModel::skipParticipant,
+                            onClearParticipants = myModel::clearParticipants
+                        )
 
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .verticalScroll(scrollState),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        TopStats(score, spacedOutCount, zonesCaught, misses, ob)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        ScoringGrid(fieldFlipped, clickedZones, myModel)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        SweetSpotBonusButton(sweetSpotBonusOn, myModel::toggleSweetSpotBonus)
+                        ParticipantList(queue = queue)
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .verticalScroll(scrollState),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            TopStats(score, spacedOutCount, zonesCaught, misses, ob)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            ScoringGrid(fieldFlipped, clickedZones, myModel)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            SweetSpotBonusButton(sweetSpotBonusOn, myModel::toggleSweetSpotBonus)
+                        }
                     }
-                }
 
-                LogCard(logEntries = logEntries)
+                    LogCard(logEntries = logEntries)
+                }
             }
         }
 
