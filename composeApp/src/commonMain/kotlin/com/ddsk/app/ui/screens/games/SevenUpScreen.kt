@@ -133,7 +133,7 @@ object SevenUpScreen : Screen {
                             .fillMaxHeight(),
                         verticalArrangement = Arrangement.spacedBy(columnSpacing)
                     ) {
-                        SevenUpScoreSummaryCard(navigator = navigator, uiState)
+                        SevenUpScoreSummaryCard(navigator = navigator, uiState = uiState, screenModel = screenModel)
                         Box(modifier = Modifier.weight(1f)) {
                             SevenUpGrid(
                                 screenModel = screenModel,
@@ -141,7 +141,7 @@ object SevenUpScreen : Screen {
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
-                        SevenUpControlRow(screenModel = screenModel, uiState = uiState)
+                        // Buttons moved into the score card.
                     }
 
                     // Right Column: Timers, Queue, Import/Export
@@ -163,16 +163,23 @@ object SevenUpScreen : Screen {
                             onLongPressStop = { dialogState.value = SevenUpDialogState.ManualTimeEntry }
                         )
                         SevenUpQueueCard(uiState = uiState)
-                        SevenUpImportExportCard(
-                            onImportClick = { filePicker.launch() },
-                            onExportClick = {
+
+                        SevenUpParticipantNavCard(
+                            onPrevious = { screenModel.previousParticipant() },
+                            onSkip = { screenModel.skipParticipant() },
+                            onNext = { screenModel.nextParticipant() },
+                            onResetRound = { screenModel.resetCurrentRound() },
+                            onImport = { filePicker.launch() },
+                            onExport = {
                                 scope.launch {
                                     val template = fetchTemplateBytes("sevenup") // Implementation via FileUtils
                                     screenModel.exportData(template)
                                 }
                             },
-                            onLogClick = { screenModel.exportLog() }
+                            onLog = { screenModel.exportLog() }
                         )
+
+                        // Import/Export/Log moved into the Participants card above.
                     }
                 }
             }
@@ -203,17 +210,51 @@ object SevenUpScreen : Screen {
 }
 
 @Composable
-fun SevenUpScoreSummaryCard(navigator: cafe.adriel.voyager.navigator.Navigator, uiState: SevenUpUiState) {
+fun SevenUpScoreSummaryCard(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
+    uiState: SevenUpUiState,
+    screenModel: SevenUpScreenModel
+) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                GameHomeButton(navigator = navigator)
-                Text(text = "Score: ${uiState.currentScore}", style = MaterialTheme.typography.h4)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GameHomeButton(navigator = navigator)
+                    Text(text = "Score: ${uiState.currentScore}", style = MaterialTheme.typography.h4)
+                }
+
+                // Right side controls moved from the old control row
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = { screenModel.undo() },
+                        colors = ButtonDefaults.buttonColors(backgroundColor = warningOrange)
+                    ) {
+                        Text("Undo")
+                    }
+
+                    Button(
+                        onClick = { screenModel.toggleGridVersion() },
+                        enabled = !uiState.hasStarted
+                    ) {
+                        Text("V ${uiState.gridVersion + 1}")
+                    }
+
+                    Button(
+                        onClick = { screenModel.toggleAllRollers() },
+                        colors = ButtonDefaults.buttonColors(backgroundColor = if (uiState.allRollers) successGreen else disabledBackground)
+                    ) {
+                        Text("All Rollers")
+                    }
+                }
             }
+
             Spacer(modifier = Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Jumps: ${uiState.jumpsClickedCount}")
@@ -249,6 +290,8 @@ fun SevenUpGrid(
             // Map grid based on version and flip state
             val layout = getSevenUpLayout(uiState.gridVersion, uiState.isFieldFlipped)
 
+            val roundOver = uiState.nonJumpMark > 5
+
             Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
                 (0 until rows).forEach { r ->
                     Row(
@@ -257,26 +300,44 @@ fun SevenUpGrid(
                     ) {
                         (0 until cols).forEach { c ->
                             val cellType = layout[r][c]
+
+                            val cellKey = "$r,$c"
+                            val nonJumpMarkValue = uiState.markedCells[cellKey]
+
                             // Cell implementation
                             val isActive = when (cellType) {
                                 is SevenUpCell.Jump -> uiState.jumpState[cellType.id]?.clicked == true
-                                is SevenUpCell.NonJump -> uiState.nonJumpState["${r},${c}"]?.clicked == true
+                                is SevenUpCell.NonJump -> nonJumpMarkValue != null
                                 else -> false
                             }
-                            val isDisabled = when (cellType) {
-                                is SevenUpCell.Jump -> uiState.jumpState[cellType.id]?.disabled == true
-                                is SevenUpCell.NonJump -> uiState.nonJumpDisabled
+
+                            val isDisabled = when {
+                                roundOver -> true
+                                cellType is SevenUpCell.Jump -> uiState.jumpState[cellType.id]?.disabled == true
+                                cellType is SevenUpCell.NonJump -> uiState.nonJumpDisabled || nonJumpMarkValue != null
                                 else -> true
+                            }
+
+                            val jumpCount = when (cellType) {
+                                is SevenUpCell.Jump -> uiState.jumpCounts[cellType.id] ?: 0
+                                else -> null
+                            }
+
+                            val nonJumpLabel = when (cellType) {
+                                is SevenUpCell.NonJump -> nonJumpMarkValue?.toString()
+                                else -> null
                             }
 
                             Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                                 if (cellType !is SevenUpCell.Empty) {
                                     SevenUpButton(
                                         label = cellType.label,
+                                        count = jumpCount,
+                                        nonJumpLabel = nonJumpLabel,
                                         active = isActive,
                                         disabled = isDisabled && !isActive,
                                         isSweetSpot = cellType is SevenUpCell.NonJump && cellType.isSweetSpot,
-                                        onClick = { screenModel.handleGridClick(r, c, cellType) }
+                                        onClick = { if (!roundOver) screenModel.handleGridClick(r, c, cellType) }
                                     )
                                 }
                             }
@@ -291,6 +352,8 @@ fun SevenUpGrid(
 @Composable
 fun SevenUpButton(
     label: String,
+    count: Int?,
+    nonJumpLabel: String?,
     active: Boolean,
     disabled: Boolean,
     isSweetSpot: Boolean,
@@ -299,13 +362,13 @@ fun SevenUpButton(
     val bgColor = when {
         active -> if (isSweetSpot) boomPink else successGreen
         disabled -> disabledBackground
-        isSweetSpot -> infoCyan // Special color for Sweet Spot center
+        isSweetSpot -> infoCyan
         else -> primaryBlue
     }
 
     Button(
         onClick = onClick,
-        enabled = !disabled || active, // Allow clicking active to potentially undo or just valid state? Logic handled in Model
+        enabled = !disabled || active,
         colors = ButtonDefaults.buttonColors(
             backgroundColor = bgColor,
             contentColor = if (active || !disabled) Color.White else disabledContent,
@@ -315,7 +378,30 @@ fun SevenUpButton(
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        Text(text = label, style = MaterialTheme.typography.h6, textAlign = TextAlign.Center)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(text = label, style = MaterialTheme.typography.h6, textAlign = TextAlign.Center)
+
+            when {
+                // Jump counter
+                count != null -> {
+                    Text(
+                        text = count.toString(),
+                        style = MaterialTheme.typography.h5,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                // Non-jump mark label (1..5)
+                nonJumpLabel != null -> {
+                    Text(
+                        text = nonJumpLabel,
+                        style = MaterialTheme.typography.h5,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -365,10 +451,9 @@ fun SevenUpTimerCard(
                     ) { Text("Stop") }
                 }
             }
-            if (!timerRunning && timeLeft > 0 && timeLeft < 60) {
-                TextButton(onClick = onLongPressStop) {
-                    Text("Edit Time")
-                }
+            // Always allow editing time, per requirement.
+            TextButton(onClick = onLongPressStop) {
+                Text("Edit Time")
             }
         }
     }
@@ -376,21 +461,6 @@ fun SevenUpTimerCard(
 
 // ... Additional helper composables (Queue, ImportExport, ControlRow) would follow standard patterns ...
 // Using placeholders for brevity in this fix to ensure compilation
-
-@Composable
-fun SevenUpControlRow(screenModel: SevenUpScreenModel, uiState: SevenUpUiState) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Button(onClick = { screenModel.undo() }, colors = ButtonDefaults.buttonColors(backgroundColor = warningOrange)) {
-            Text("Undo")
-        }
-        Button(onClick = { screenModel.toggleGridVersion() }) {
-            Text("Version ${uiState.gridVersion + 1}")
-        }
-        Button(onClick = { screenModel.toggleAllRollers() }, colors = ButtonDefaults.buttonColors(backgroundColor = if(uiState.allRollers) successGreen else disabledBackground)) {
-            Text("All Rollers")
-        }
-    }
-}
 
 @Composable
 fun SevenUpQueueCard(uiState: SevenUpUiState) {
@@ -405,11 +475,55 @@ fun SevenUpQueueCard(uiState: SevenUpUiState) {
 }
 
 @Composable
-fun SevenUpImportExportCard(onImportClick: () -> Unit, onExportClick: () -> Unit, onLogClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-        OutlinedButton(onClick = onImportClick) { Text("Import") }
-        OutlinedButton(onClick = onExportClick) { Text("Export") }
-        OutlinedButton(onClick = onLogClick) { Text("Log") }
+fun SevenUpParticipantNavCard(
+    onPrevious: () -> Unit,
+    onSkip: () -> Unit,
+    onNext: () -> Unit,
+    onResetRound: () -> Unit,
+    onImport: () -> Unit,
+    onExport: () -> Unit,
+    onLog: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(16.dp), elevation = 4.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Participants", style = MaterialTheme.typography.subtitle1, fontWeight = FontWeight.Bold)
+
+            // Top row: Import / Export / Log
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = onImport, modifier = Modifier.weight(1f)) { Text("Import") }
+                OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) { Text("Export") }
+                OutlinedButton(onClick = onLog, modifier = Modifier.weight(1f)) { Text("Log") }
+            }
+
+            // Navigation rows
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onPrevious,
+                    colors = ButtonDefaults.buttonColors(backgroundColor = boomPink),
+                    modifier = Modifier.weight(1f)
+                ) { Text("Previous") }
+
+                Button(
+                    onClick = onSkip,
+                    colors = ButtonDefaults.buttonColors(backgroundColor = boomPink),
+                    modifier = Modifier.weight(1f)
+                ) { Text("Skip") }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onNext,
+                    colors = ButtonDefaults.buttonColors(backgroundColor = boomPink),
+                    modifier = Modifier.weight(1f)
+                ) { Text("Next") }
+
+                Button(
+                    onClick = onResetRound,
+                    colors = ButtonDefaults.buttonColors(backgroundColor = warningOrange, contentColor = Color.White),
+                    modifier = Modifier.weight(1f)
+                ) { Text("Reset Round") }
+            }
+        }
     }
 }
 
@@ -420,25 +534,83 @@ fun SevenUpImportExportCard(onImportClick: () -> Unit, onExportClick: () -> Unit
 // SevenUpCell moved to SevenUpScreenModel.kt
 
 fun getSevenUpLayout(version: Int, flipped: Boolean): List<List<SevenUpCell>> {
-    // Basic implementation of one version for compilation; expand for all 11 versions
-    // Grid: 3 rows, 5 cols.
-    // Default Layout (Version 0):
-    // Row 0: ., Jump3, ., ., Jump7
-    // Row 1: Jump1, ., SweetSpot, Jump5, .
-    // Row 2: Jump2, Jump4, ., Jump6, .
+    // Grid: 3 rows x 5 cols.
+    // Matches the React code's per-version mapping. Empty cells are NonJump(""), Sweet Spot is NonJump("SS", true).
 
-    // Simplification: Using Version 0 fixed map for now, logic can be expanded
-    val raw = listOf(
-        listOf(SevenUpCell.NonJump(""), SevenUpCell.Jump("J3", "3"), SevenUpCell.NonJump(""), SevenUpCell.NonJump(""), SevenUpCell.Jump("J7", "7")),
-        listOf(SevenUpCell.Jump("J1", "1"), SevenUpCell.NonJump(""), SevenUpCell.NonJump("SS", true), SevenUpCell.Jump("J5", "5"), SevenUpCell.NonJump("")),
-        listOf(SevenUpCell.Jump("J2", "2"), SevenUpCell.Jump("J4", "4"), SevenUpCell.NonJump(""), SevenUpCell.Jump("J6", "6"), SevenUpCell.NonJump(""))
-    )
+    fun base(): List<List<SevenUpCell>> {
+        val E = SevenUpCell.NonJump("")
+        val SS = SevenUpCell.NonJump("SS", true)
+        fun J(n: Int) = SevenUpCell.Jump("J$n", "Jump$n")
 
-    // Applying Flip if needed (reverse rows and cols)
-    if (flipped) {
-        return raw.reversed().map { it.reversed() }
+        return when (version) {
+            0 -> listOf(
+                listOf(E, J(3), E, E, J(7)),
+                listOf(J(1), E, SS, J(5), E),
+                listOf(J(2), J(4), E, J(6), E)
+            )
+            1 -> listOf(
+                listOf(J(1), E, E, E, J(7)),
+                listOf(J(2), J(3), SS, J(5), E),
+                listOf(E, E, J(4), J(6), E)
+            )
+            2 -> listOf(
+                listOf(J(1), J(3), E, J(4), E),
+                listOf(J(2), E, SS, E, J(6)),
+                listOf(E, E, E, J(5), J(7))
+            )
+            3 -> listOf(
+                listOf(E, J(2), E, E, E),
+                listOf(J(1), J(3), SS, J(5), J(6)),
+                listOf(E, E, J(4), E, J(7))
+            )
+            4 -> listOf(
+                listOf(J(1), E, J(4), E, J(6)),
+                listOf(E, J(3), SS, J(5), E),
+                listOf(J(2), E, E, E, J(7))
+            )
+            5 -> listOf(
+                listOf(E, E, J(4), E, E),
+                listOf(E, J(2), SS, J(5), E),
+                listOf(J(1), J(3), E, J(6), J(7))
+            )
+            6 -> listOf(
+                listOf(E, J(2), E, J(5), J(6)),
+                listOf(E, J(3), SS, E, J(7)),
+                listOf(J(1), J(4), E, E, E)
+            )
+            7 -> listOf(
+                listOf(J(1), E, E, SevenUpCell.Empty, SevenUpCell.Empty),
+                listOf(E, J(3), SS, SevenUpCell.Empty, SevenUpCell.Empty),
+                listOf(J(2), E, E, SevenUpCell.Empty, SevenUpCell.Empty)
+            )
+            8 -> listOf(
+                listOf(SevenUpCell.Empty, SevenUpCell.Empty, J(1), E, E),
+                listOf(SevenUpCell.Empty, SevenUpCell.Empty, SS, J(2), E),
+                listOf(SevenUpCell.Empty, SevenUpCell.Empty, E, E, J(3))
+            )
+            9 -> listOf(
+                listOf(E, J(1), E, SevenUpCell.Empty, SevenUpCell.Empty),
+                listOf(E, J(2), SS, SevenUpCell.Empty, SevenUpCell.Empty),
+                listOf(E, J(3), E, SevenUpCell.Empty, SevenUpCell.Empty)
+            )
+            10 -> listOf(
+                listOf(SevenUpCell.Empty, SevenUpCell.Empty, E, E, E),
+                listOf(SevenUpCell.Empty, SevenUpCell.Empty, SS, J(2), J(3)),
+                listOf(SevenUpCell.Empty, SevenUpCell.Empty, J(1), E, J(4))
+            )
+            else -> listOf(
+                listOf(E, J(3), E, E, J(7)),
+                listOf(J(1), E, SS, J(5), E),
+                listOf(J(2), J(4), E, J(6), E)
+            )
+        }
     }
-    return raw
+
+    val raw = base()
+
+    // React applies column reversal for flipped depending on mapping; our earlier implementation reversed rows+cols.
+    // To match the existing app behavior, we keep the same full flip (reverse both axes).
+    return if (flipped) raw.reversed().map { it.reversed() } else raw
 }
 
 // Dialog Composable Placeholders

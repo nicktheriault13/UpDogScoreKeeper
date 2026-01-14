@@ -23,7 +23,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.math.max
-import kotlin.math.round
 import kotlin.time.TimeSource
 
 @Serializable
@@ -57,6 +56,8 @@ data class SevenUpUiState(
     val score: Int = 0,
     val jumpCounts: Map<String, Int> = emptyMap(),
     val disabledJumps: Set<String> = emptySet(),
+    // Track which jump buttons should be highlighted as 'clicked' since the last non-jump.
+    val jumpsClickedSinceLastNonJump: Set<String> = emptySet(),
     val jumpStreak: Int = 0,
     val markedCells: Map<String, Int> = emptyMap(),
     val nonJumpMark: Int = 1,
@@ -67,6 +68,9 @@ data class SevenUpUiState(
     val isFlipped: Boolean = false,
     val timeRemaining: Float = 60.0f,
     val isTimerRunning: Boolean = false,
+    // Tracks how many manual time edits have occurred this round. Used to prevent doubling score additions
+    // when the user edits time multiple times.
+    val manualTimeEdits: Int = 0,
     val activeParticipant: SevenUpParticipant? = null,
     val queue: List<SevenUpParticipant> = emptyList(),
     val completed: List<SevenUpParticipant> = emptyList(),
@@ -80,13 +84,19 @@ data class SevenUpUiState(
     val sweetSpotBonusActive: Boolean get() = sweetSpotBonus
     val gridVersion: Int get() = rectangleVersion
     val isFieldFlipped: Boolean get() = isFlipped
-    val nonJumpDisabled: Boolean get() = jumpStreak < 3 && hasStarted
+    // React behavior: non-jumps are disabled until started, and you can't do two non-jumps in a row.
+    // (Additional per-cell checks like already-marked and nonJumpMark>5 are handled in UI by active/marked state and in model in handleCellPress.)
+    val nonJumpDisabled: Boolean get() = !hasStarted || lastWasNonJump || nonJumpMark > 5
 
     val jumpState: Map<String, JumpState> get() {
-        return jumpCounts.keys.associateWith { id ->
-            JumpState(clicked = (jumpCounts[id] ?: 0) > 0, disabled = disabledJumps.contains(id))
-        } + disabledJumps.associateWith { id ->
-            JumpState(clicked = (jumpCounts[id] ?: 0) > 0, disabled = true)
+        // clicked is based on the per-round highlight set (resets on non-jump),
+        // while disabled is based on disabledJumps.
+        val ids = (jumpCounts.keys + disabledJumps + jumpsClickedSinceLastNonJump).toSet()
+        return ids.associateWith { id ->
+            JumpState(
+                clicked = jumpsClickedSinceLastNonJump.contains(id),
+                disabled = disabledJumps.contains(id)
+            )
         }
     }
 
@@ -198,6 +208,7 @@ class SevenUpScreenModel : ScreenModel {
                 score = 0,
                 jumpCounts = emptyMap(),
                 disabledJumps = emptySet(),
+                jumpsClickedSinceLastNonJump = emptySet(),
                 jumpStreak = 0,
                 markedCells = emptyMap(),
                 nonJumpMark = 1,
@@ -206,6 +217,7 @@ class SevenUpScreenModel : ScreenModel {
                 hasStarted = false,
                 timeRemaining = 60.0f,
                 isTimerRunning = false,
+                manualTimeEdits = 0,
                 currentRoundLog = emptyList(),
                 allRollers = false
             )
@@ -248,15 +260,24 @@ class SevenUpScreenModel : ScreenModel {
 
     fun setTimeManually(timeStr: String) {
         val newTimeRaw = timeStr.toFloatOrNull() ?: return
-        // Use Float version
         val newTime = roundToHundredths(newTimeRaw)
+
         timerJob?.cancel()
+
         _uiState.update { state ->
-            val roundedForScore = kotlin.math.round(newTime).toInt()
+            // Requirement: "when it is editted then add the value entered rounded to the nearest whole number to the score"
+            // If they edit multiple times, add the *delta* from the last edit to avoid double-counting.
+            val enteredPoints = kotlin.math.round(newTime).toInt()
+
+            val priorEdits = state.manualTimeEdits
+            val priorPointsAccounted = if (priorEdits <= 0) 0 else kotlin.math.round(state.timeRemaining).toInt()
+            val delta = enteredPoints - priorPointsAccounted
+
             state.copy(
                 timeRemaining = newTime,
                 isTimerRunning = false,
-                score = state.score + roundedForScore
+                manualTimeEdits = priorEdits + 1,
+                score = state.score + delta
             )
         }
         persistState()
@@ -308,51 +329,87 @@ class SevenUpScreenModel : ScreenModel {
         }
     }
 
+    private fun normalizeJumpId(label: String): String? {
+        // Accept both UI labels ("Jump1") and ids ("J1") to stay robust.
+        val cleaned = label.trim()
+        val jMatch = Regex("\\bJ([1-7])\\b").find(cleaned)
+        if (jMatch != null) return "J" + jMatch.groupValues[1]
+
+        // "Jump1" or "Jump 1"
+        val jumpMatch = Regex("Jump\\s*([1-7])").find(cleaned)
+        if (jumpMatch != null) return "J" + jumpMatch.groupValues[1]
+
+        return null
+    }
+
     fun handleGridClick(row: Int, col: Int, cell: SevenUpCell) {
-        val label = when(cell) {
-            is SevenUpCell.Jump -> "Jump ${cell.label}"
-            is SevenUpCell.NonJump -> if (cell.isSweetSpot) "Sweet Spot" else "NonJump"
+        when (cell) {
+            // IMPORTANT: use the stable id for jumps so scoring/disable state lines up with UI lookups.
+            is SevenUpCell.Jump -> handleCellPress(cell.id, row, col)
+            is SevenUpCell.NonJump -> handleCellPress(if (cell.isSweetSpot) "Sweet Spot" else "", row, col)
             else -> return
         }
-        handleCellPress(label, row, col)
     }
 
     private fun handleCellPress(label: String, row: Int, col: Int) {
         val cellKey = "$row,$col"
-        if (label.startsWith("Jump")) {
-            if (!_uiState.value.hasStarted) _uiState.update { it.copy(hasStarted = true) }
-            if (label in _uiState.value.disabledJumps) return
+        val jumpId = normalizeJumpId(label)
+
+        if (jumpId != null) {
+            if (!_uiState.value.hasStarted) {
+                _uiState.update { state ->
+                    state.copy(
+                        hasStarted = true,
+                        jumpStreak = 1,
+                        disabledJumps = setOf(jumpId),
+                        jumpsClickedSinceLastNonJump = setOf(jumpId),
+                        jumpCounts = state.jumpCounts + (jumpId to ((state.jumpCounts[jumpId] ?: 0) + 1)),
+                        score = state.score + 3,
+                        lastWasNonJump = false
+                    )
+                }
+                persistState()
+                return
+            }
+
+            if (jumpId in _uiState.value.disabledJumps) return
             if (_uiState.value.jumpStreak >= 3) return
 
-            _uiState.update {
-                it.copy(
-                    jumpStreak = it.jumpStreak + 1,
-                    disabledJumps = it.disabledJumps + label,
-                    jumpCounts = it.jumpCounts + (label to (it.jumpCounts[label] ?: 0) + 1),
-                    score = it.score + 3,
+            _uiState.update { state ->
+                state.copy(
+                    jumpStreak = state.jumpStreak + 1,
+                    disabledJumps = state.disabledJumps + jumpId,
+                    jumpsClickedSinceLastNonJump = state.jumpsClickedSinceLastNonJump + jumpId,
+                    jumpCounts = state.jumpCounts + (jumpId to ((state.jumpCounts[jumpId] ?: 0) + 1)),
+                    score = state.score + 3,
                     lastWasNonJump = false
                 )
             }
-        } else {
-             if (!_uiState.value.hasStarted || _uiState.value.lastWasNonJump) return
-            if (cellKey in _uiState.value.markedCells) return
-            if (_uiState.value.nonJumpMark > 5) return
+            persistState()
+            return
+        }
 
-            _uiState.update { state ->
-                val isFifthMark = state.nonJumpMark == 5
-                val isSweetSpotFifth = isFifthMark && label == "Sweet Spot"
-                val pointsAwarded = if (isSweetSpotFifth) 1 + 7 else 1
+        // Non-jump zone logic
+        if (!_uiState.value.hasStarted) return
+        if (_uiState.value.lastWasNonJump) return
+        if (cellKey in _uiState.value.markedCells) return
+        if (_uiState.value.nonJumpMark > 5) return
 
-                state.copy(
-                    markedCells = state.markedCells + (cellKey to state.nonJumpMark),
-                    score = state.score + pointsAwarded,
-                    nonJumpMark = state.nonJumpMark + 1,
-                    sweetSpotBonus = state.sweetSpotBonus || isSweetSpotFifth,
-                    jumpStreak = 0,
-                    disabledJumps = emptySet(),
-                    lastWasNonJump = true
-                )
-            }
+        _uiState.update { state ->
+            val isFifthMark = state.nonJumpMark == 5
+            val isSweetSpotFifth = isFifthMark && label == "Sweet Spot"
+            val pointsAwarded = if (isSweetSpotFifth) 8 else 1
+
+            state.copy(
+                markedCells = state.markedCells + (cellKey to state.nonJumpMark),
+                score = state.score + pointsAwarded,
+                nonJumpMark = state.nonJumpMark + 1,
+                sweetSpotBonus = state.sweetSpotBonus || isSweetSpotFifth,
+                jumpStreak = 0,
+                disabledJumps = emptySet(),
+                jumpsClickedSinceLastNonJump = emptySet(),
+                lastWasNonJump = true
+            )
         }
         persistState()
     }
@@ -429,6 +486,55 @@ class SevenUpScreenModel : ScreenModel {
         resetRoundStateOnly()
         setAllRollers(false)
         logEvent("Next")
+        persistState()
+    }
+
+    /** Reset only the current round state (score/timer/grid marks) for the current active participant. */
+    fun resetCurrentRound() {
+        resetRoundStateOnly()
+        persistState()
+    }
+
+    /** Skip the current participant: move active participant to end of queue, then advance to next in queue. */
+    fun skipParticipant() {
+        _uiState.update { state ->
+            val active = state.activeParticipant
+            if (active == null) return@update state
+
+            val newQueue = state.queue + active
+            val newActive = newQueue.firstOrNull()
+            state.copy(
+                activeParticipant = newActive,
+                queue = if (newQueue.isEmpty()) emptyList() else newQueue.drop(1)
+            )
+        }
+        resetRoundStateOnly()
+        setAllRollers(false)
+        logEvent("Skip")
+        persistState()
+    }
+
+    /** Go to previous participant: pull last queued team to active (if any) and push current active to front of queue. */
+    fun previousParticipant() {
+        _uiState.update { state ->
+            val queue = state.queue
+            if (queue.isEmpty()) return@update state
+
+            val prev = queue.last()
+            val rest = queue.dropLast(1)
+            val newQueue = buildList {
+                state.activeParticipant?.let { add(it) }
+                addAll(rest)
+            }
+
+            state.copy(
+                activeParticipant = prev,
+                queue = newQueue
+            )
+        }
+        resetRoundStateOnly()
+        setAllRollers(false)
+        logEvent("Previous")
         persistState()
     }
 }
