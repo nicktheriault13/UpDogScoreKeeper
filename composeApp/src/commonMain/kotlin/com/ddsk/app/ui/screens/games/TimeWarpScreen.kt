@@ -495,24 +495,28 @@ private fun FieldGrid(
         elevation = 6.dp,
         backgroundColor = Palette.surfaceContainer,
         shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().height(300.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(300.dp)
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             rows.forEach { r ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(if (r == 1) 160.dp else 70.dp)
+                        .weight(if (r == 1) 2f else 1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     cols.forEach { c ->
-                        val isZone1 = c == 0
-                        val isZone2 = c == 1
-                        val isZone3 = (c == 2 && r == 1)
-
                         val zoneNumber = when {
-                            isZone1 -> 1
-                            isZone2 -> 2
-                            isZone3 -> 3
+                            c == 0 -> 1
+                            c == 1 -> 2
+                            c == 2 && r == 1 -> 3
                             else -> null
                         }
 
@@ -526,12 +530,28 @@ private fun FieldGrid(
 
                         Box(
                             modifier = Modifier
-                                .width(1.dp)
+                                .weight(1f)
                                 .fillMaxHeight()
-                                .background(Palette.surface)
-                                .padding(2.dp)
+                                .background(bg, RoundedCornerShape(12.dp))
+                                .clickable(enabled = zoneNumber != null) {
+                                    zoneNumber?.let(onZoneClick)
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
-                            // NOTE: we keep layout simple; zone cards inside fill remaining.
+                            if (zoneNumber != null) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = "Zone $zoneNumber",
+                                        color = fg,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = if (clicked) "Clicked" else "Tap",
+                                        color = fg,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }

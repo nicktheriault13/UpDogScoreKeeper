@@ -59,6 +59,7 @@ import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 object SpacedOutScreen : Screen {
     @Composable
@@ -481,46 +482,94 @@ private fun ScoringGrid(
     clickedZones: Set<SpacedOutZone>,
     screenModel: SpacedOutScreenModel
 ) {
-    Column(
+    // React parity:
+    // Grid: 3 rows x 5 columns. Middle row is double height.
+    // Only 4 scoring buttons are shown at fixed coordinates (after applying flip mapping):
+    // - Zone1 at (row=2,col=1)
+    // - Sweet Spot (zone button) at (row=1,col=2)
+    // - Zone2 at (row=0,col=2)
+    // - Zone3 at (row=0,col=3)
+    // All other cells are empty.
+
+    val outerShape = RoundedCornerShape(18.dp)
+    val cellBorderColor = MaterialTheme.colors.onSurface.copy(alpha = 0.25f)
+    val zoneShape = RoundedCornerShape(10.dp)
+
+    // Field sizing: use a fixed height similar to the previous UI, but keep it responsive in width.
+    // (React uses ~0.45 * min(windowW, windowH)). On desktop and android this gives stable visuals.
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colors.onSurface)
-            .padding(12.dp)
+            .padding(horizontal = 8.dp)
     ) {
-        Text("Scoring Grid", style = MaterialTheme.typography.subtitle1, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(8.dp))
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(260.dp)
-                .border(1.dp, MaterialTheme.colors.onSurface)
+        val fieldWidth = maxWidth
+        val fieldHeight = (fieldWidth * 0.5f).coerceAtMost(320.dp).coerceAtLeast(200.dp)
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            val rows = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
-            val cols = if (fieldFlipped) listOf(4, 3, 2, 1, 0) else listOf(0, 1, 2, 3, 4)
-            Column {
-                rows.forEach { row ->
-                    Row(modifier = Modifier.weight(if (row == 1) 2f else 1f)) {
-                        cols.forEach { col ->
-                            val zone = getZoneForCell(row, col)
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .border(0.5.dp, MaterialTheme.colors.onSurface)
-                                    .background(
-                                        if (clickedZones.contains(zone)) MaterialTheme.colors.secondary else MaterialTheme.colors.surface
-                                    )
-                                    .clickable(enabled = zone != null) {
-                                        if (zone != null) screenModel.handleZoneClick(zone)
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (zone != null) {
-                                    Text(
-                                        text = zone.label,
-                                        style = MaterialTheme.typography.h6,
-                                        color = if (clickedZones.contains(zone)) MaterialTheme.colors.onSecondary else MaterialTheme.colors.onSurface
-                                    )
+            Surface(
+                elevation = 2.dp,
+                shape = outerShape,
+                color = MaterialTheme.colors.surface,
+                modifier = Modifier
+                    .width(fieldWidth)
+                    .height(fieldHeight)
+                    .border(1.dp, MaterialTheme.colors.onSurface.copy(alpha = 0.35f), outerShape)
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    for (visualRow in 0..2) {
+                        Row(modifier = Modifier.weight(if (visualRow == 1) 2f else 1f)) {
+                            for (visualCol in 0..4) {
+                                // Apply React-style flip mapping: actualRow/Col is reversed when flipped.
+                                val actualRow = if (fieldFlipped) 2 - visualRow else visualRow
+                                val actualCol = if (fieldFlipped) 4 - visualCol else visualCol
+
+                                val zone: SpacedOutZone? = when {
+                                    actualRow == 2 && actualCol == 1 -> SpacedOutZone.Zone1
+                                    actualRow == 1 && actualCol == 2 -> SpacedOutZone.Zone2 // Sweet Spot zone button uses Zone2
+                                    actualRow == 0 && actualCol == 2 -> SpacedOutZone.Zone3
+                                    actualRow == 0 && actualCol == 3 -> SpacedOutZone.Zone4
+                                    else -> null
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .border(1.dp, cellBorderColor)
+                                        .padding(4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (zone != null) {
+                                        val isClicked = clickedZones.contains(zone)
+                                        val bg = if (isClicked) Color(0xFF00C853) else MaterialTheme.colors.primary
+                                        val fg = if (isClicked) Color.White else MaterialTheme.colors.onPrimary
+
+                                        val label = when (zone) {
+                                            SpacedOutZone.Zone1 -> "zone1"
+                                            SpacedOutZone.Zone2 -> "Sweet Spot"
+                                            SpacedOutZone.Zone3 -> "zone2"
+                                            SpacedOutZone.Zone4 -> "zone3"
+                                            else -> zone.label
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(bg, zoneShape)
+                                                .clickable { screenModel.handleZoneClick(zone) },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = fg,
+                                                fontWeight = FontWeight.Bold,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -528,30 +577,6 @@ private fun ScoringGrid(
                 }
             }
         }
-    }
-}
-
-private fun getZoneForCell(row: Int, col: Int): SpacedOutZone? {
-    // Mapping logic based on grid structure
-    return when {
-        row == 0 && col == 0 -> SpacedOutZone.Zone1
-        row == 0 && col == 1 -> SpacedOutZone.Zone2
-        row == 0 && col == 2 -> SpacedOutZone.Zone3
-        row == 0 && col == 3 -> SpacedOutZone.Zone4
-        row == 0 && col == 4 -> SpacedOutZone.Zone5
-        // Middle row (wider/larger areas usually)
-        row == 1 && col == 0 -> SpacedOutZone.Zone6
-        row == 1 && col == 1 -> SpacedOutZone.Zone7
-        row == 1 && col == 2 -> SpacedOutZone.Zone8
-        row == 1 && col == 3 -> SpacedOutZone.Zone9
-        row == 1 && col == 4 -> SpacedOutZone.Zone10
-        // Bottom row
-        row == 2 && col == 0 -> SpacedOutZone.Zone11
-        row == 2 && col == 1 -> SpacedOutZone.Zone12
-        row == 2 && col == 2 -> SpacedOutZone.Zone13
-        row == 2 && col == 3 -> SpacedOutZone.Zone14
-        row == 2 && col == 4 -> SpacedOutZone.Zone15
-        else -> null
     }
 }
 
