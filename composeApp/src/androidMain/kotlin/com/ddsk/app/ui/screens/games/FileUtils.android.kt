@@ -96,22 +96,41 @@ actual fun parseXlsxRows(bytes: ByteArray): List<List<String>> {
     try {
         val inputStream = ByteArrayInputStream(bytes)
         val workbook = WorkbookFactory.create(inputStream)
-        val sheet = workbook.getSheetAt(0)
+
+        // Many UDC templates store participant rows on a named sheet.
+        // Prefer that over sheet 0 to avoid reading a cover/instructions page.
+        val sheet = workbook.getSheet("Data Entry Sheet")
+            ?: workbook.getSheet("Data Entry")
+            ?: workbook.getSheetAt(0)
+
+        // Formula cells are common in templates; use evaluator so we extract display values.
+        val evaluator = workbook.creationHelper.createFormulaEvaluator()
 
         for (row in sheet) {
             val rowData = mutableListOf<String>()
-            val lastCellNum = row.lastCellNum.toInt()
+            val lastCellNum = row.lastCellNum.toInt().coerceAtLeast(0)
             for (i in 0 until lastCellNum) {
                 val cell = row.getCell(i)
                 val cellValue = if (cell == null) "" else {
                     when (cell.cellType) {
                         CellType.STRING -> cell.stringCellValue
                         CellType.NUMERIC -> {
-                            // Check if date or just number
                             val num = cell.numericCellValue
                             if (num % 1.0 == 0.0) String.format(Locale.US, "%.0f", num) else num.toString()
                         }
                         CellType.BOOLEAN -> cell.booleanCellValue.toString()
+                        CellType.FORMULA -> {
+                            val evaluated = runCatching { evaluator.evaluate(cell) }.getOrNull()
+                            when (evaluated?.cellType) {
+                                CellType.STRING -> evaluated.stringValue
+                                CellType.NUMERIC -> {
+                                    val num = evaluated.numberValue
+                                    if (num % 1.0 == 0.0) String.format(Locale.US, "%.0f", num) else num.toString()
+                                }
+                                CellType.BOOLEAN -> evaluated.booleanValue.toString()
+                                else -> cell.toString()
+                            }
+                        }
                         else -> ""
                     }
                 }
@@ -563,6 +582,62 @@ actual fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateB
         e.printStackTrace()
         ByteArray(0)
     }
+}
+
+actual fun generateSpacedOutXlsx(participants: List<SpacedOutExportParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 in Excel (0-based)
+
+        // Sort like React: score desc, then spacedOut desc, then misses asc
+        val sorted = participants.sortedWith(
+            compareByDescending<SpacedOutExportParticipant> { itScore(it) }
+                .thenByDescending { it.spacedOut }
+                .thenBy { it.misses }
+        )
+
+        sorted.forEachIndexed { index, p ->
+            val rowNum = startRow + index
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+
+            row.createCell(0).setCellValue(1.0)
+            row.createCell(1).setCellValue(p.handler)
+            row.createCell(2).setCellValue(p.dog)
+            row.createCell(3).setCellValue(p.utn)
+
+            row.createCell(4).setCellValue(p.zonesCaught.toDouble())
+            row.createCell(5).setCellValue(p.spacedOut.toDouble())
+            row.createCell(6).setCellValue(p.misses.toDouble())
+
+            // Column I (index 8): Sweet Spot (Y/N)
+            row.createCell(8).setCellValue(if (p.sweetSpot != 0) "Y" else "N")
+
+            // Column K (index 10): All Rollers (Y/N)
+            row.createCell(10).setCellValue(if (p.allRollers != 0) "Y" else "N")
+
+            // Column N (index 13): Clean Spaced Out (Y/N)
+            val clean = (p.spacedOut >= 1 && p.misses == 0 && p.ob == 0)
+            row.createCell(13).setCellValue(if (clean) "Y" else "N")
+
+            // Column O (index 14): Height Division
+            row.createCell(14).setCellValue(p.heightDivision)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
+private fun itScore(p: SpacedOutExportParticipant): Int {
+    // Score isn't stored in SpacedOutExportParticipant; use zonesCaught*5 + spacedOut*25 + sweetSpot*5 (React rules)
+    return p.zonesCaught * 5 + p.spacedOut * 25 + (if (p.sweetSpot != 0) 5 else 0)
 }
 
 @Composable

@@ -60,6 +60,9 @@ import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.foundation.shape.RoundedCornerShape
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 object SpacedOutScreen : Screen {
     @Composable
@@ -79,12 +82,20 @@ object SpacedOutScreen : Screen {
         val zonesCaught by myModel.zonesCaught.collectAsState()
         val clickedZones by myModel.clickedZonesInRound.collectAsState()
         val sweetSpotBonusOn by myModel.sweetSpotBonusOn.collectAsState()
+        val allRollersOn by myModel.allRollersOn.collectAsState()
         val fieldFlipped by myModel.fieldFlipped.collectAsState()
         val activeParticipant by myModel.activeParticipant.collectAsState()
         val queue by myModel.participantQueue.collectAsState()
         val logEntries by myModel.logEntries.collectAsState()
         val timeLeft by myModel.timeLeft.collectAsState()
         val timerRunning by myModel.timerRunning.collectAsState()
+        val pendingJsonExport by myModel.pendingJsonExport.collectAsState()
+
+        LaunchedEffect(pendingJsonExport) {
+            val pending = pendingJsonExport ?: return@LaunchedEffect
+            saveJsonFileWithPicker(pending.filename, pending.content)
+            myModel.consumePendingJsonExport()
+        }
 
         val sidebarCollapsed = rememberSaveable { mutableStateOf(false) }
         val scrollState = rememberScrollState()
@@ -107,6 +118,9 @@ object SpacedOutScreen : Screen {
                 }
             }
         }
+
+        val exporter = rememberFileExporter()
+        val assetLoader = rememberAssetLoader()
 
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Spaced Out") })
 
@@ -144,15 +158,40 @@ object SpacedOutScreen : Screen {
                             misses = misses,
                             ob = ob,
                             sweetSpotBonusOn = sweetSpotBonusOn,
+                            allRollersOn = allRollersOn,
                             onToggleCollapse = { sidebarCollapsed.value = !sidebarCollapsed.value },
                             onMiss = myModel::incrementMisses,
                             onOb = myModel::incrementOb,
                             onSweetSpotToggle = myModel::toggleSweetSpotBonus,
+                            onAllRollersToggle = myModel::toggleAllRollers,
                             onFlipField = myModel::flipField,
                             onReset = myModel::reset,
                             onAddTeam = { showAddParticipant = true },
                             onImport = { filePicker.launch() },
-                            onExport = { exportBuffer = myModel.exportParticipantsAsCsv() },
+                            onExport = {
+                                val template = assetLoader.load("templates/UDC Spaced Out Data Entry L1 Div Sort.xlsx")
+                                if (template != null) {
+                                    val bytes = myModel.exportParticipantsAsXlsx(template)
+
+                                    // React-style timestamp: YYYYMMDD_HHMMSS
+                                    val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                    fun pad2(v: Int) = v.toString().padStart(2, '0')
+                                    val dateStr = buildString {
+                                        append(now.year)
+                                        append(pad2(now.monthNumber))
+                                        append(pad2(now.dayOfMonth))
+                                        append("_")
+                                        append(pad2(now.hour))
+                                        append(pad2(now.minute))
+                                        append(pad2(now.second))
+                                    }
+
+                                    exporter.save("SpacedOut_Scores_${dateStr}.xlsx", bytes)
+                                } else {
+                                    // Fall back to CSV export content for visibility
+                                    exportBuffer = myModel.exportParticipantsAsCsv()
+                                }
+                            },
                             onExportLog = { logBuffer = myModel.exportLog() },
                             onNext = myModel::nextParticipant,
                             onPrev = myModel::previousParticipant,
@@ -169,11 +208,32 @@ object SpacedOutScreen : Screen {
                                 .verticalScroll(scrollState),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            TopStats(score, spacedOutCount, zonesCaught, misses, ob)
+                            TopStats(
+                                score,
+                                spacedOutCount,
+                                zonesCaught,
+                                misses,
+                                ob,
+                                onMiss = myModel::incrementMisses,
+                                onOb = myModel::incrementOb,
+                                onNext = myModel::nextParticipant,
+                                onSkip = myModel::skipParticipant
+                            )
                             Spacer(modifier = Modifier.height(16.dp))
                             ScoringGrid(fieldFlipped, clickedZones, myModel)
                             Spacer(modifier = Modifier.height(16.dp))
-                            SweetSpotBonusButton(sweetSpotBonusOn, myModel::toggleSweetSpotBonus)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                SweetSpotBonusButton(
+                                    bonusOn = sweetSpotBonusOn,
+                                    onToggle = myModel::toggleSweetSpotBonus,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                AllRollersButton(
+                                    enabled = allRollersOn,
+                                    onToggle = myModel::toggleAllRollers,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
 
@@ -261,7 +321,17 @@ private fun HeaderRow(
 }
 
 @Composable
-private fun TopStats(score: Int, spacedOut: Int, zones: Int, misses: Int, ob: Int) {
+private fun TopStats(
+    score: Int,
+    spacedOut: Int,
+    zones: Int,
+    misses: Int,
+    ob: Int,
+    onMiss: () -> Unit,
+    onOb: () -> Unit,
+    onNext: () -> Unit,
+    onSkip: () -> Unit
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -274,9 +344,36 @@ private fun TopStats(score: Int, spacedOut: Int, zones: Int, misses: Int, ob: In
             StatCard(title = "Zones", value = zones.toString())
         }
         Spacer(modifier = Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
-            StatCard(title = "Misses", value = misses.toString(), accent = Color(0xFFD32F2F))
-            StatCard(title = "OB", value = ob.toString(), accent = Color(0xFFFFA000))
+
+        // Miss/OB buttons (replacing the old displays)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            SidebarButton(
+                label = "Misses: $misses",
+                color = Color(0xFFD32F2F),
+                onClick = onMiss,
+                modifier = Modifier.weight(1f)
+            )
+            SidebarButton(
+                label = "OB: $ob",
+                color = Color(0xFFFFA000),
+                onClick = onOb,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // Participant navigation row (missing in Compose; mirrors React sidebar actions)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            SidebarButton(
+                label = "Next",
+                onClick = onNext,
+                modifier = Modifier.weight(1f)
+            )
+            SidebarButton(
+                label = "Skip",
+                color = Color.LightGray,
+                onClick = onSkip,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -303,10 +400,12 @@ private fun Sidebar(
     misses: Int,
     ob: Int,
     sweetSpotBonusOn: Boolean,
+    allRollersOn: Boolean,
     onToggleCollapse: () -> Unit,
     onMiss: () -> Unit,
     onOb: () -> Unit,
     onSweetSpotToggle: () -> Unit,
+    onAllRollersToggle: () -> Unit,
     onFlipField: () -> Unit,
     onReset: () -> Unit,
     onAddTeam: () -> Unit,
@@ -333,12 +432,15 @@ private fun Sidebar(
         if (!collapsed) {
             Text("Controls", style = MaterialTheme.typography.subtitle1, fontWeight = FontWeight.Bold)
             Divider(modifier = Modifier.padding(vertical = 8.dp))
-            SidebarButton(label = "Misses: $misses", color = Color(0xFFD32F2F), onClick = onMiss)
-            SidebarButton(label = "OB: $ob", color = Color(0xFFFFA000), onClick = onOb)
             SidebarButton(
                 label = if (sweetSpotBonusOn) "Sweet Spot Bonus" else "Sweet Spot Bonus",
                 color = if (sweetSpotBonusOn) Color(0xFF2E7D32) else MaterialTheme.colors.primary,
                 onClick = onSweetSpotToggle
+            )
+            SidebarButton(
+                label = if (allRollersOn) "All Rollers" else "All Rollers",
+                color = if (allRollersOn) Color(0xFF2E7D32) else MaterialTheme.colors.primary,
+                onClick = onAllRollersToggle
             )
             SidebarButton(label = "Flip Field", onClick = onFlipField)
             SidebarButton(label = "Reset Round", onClick = onReset)
@@ -365,11 +467,16 @@ private fun Sidebar(
 }
 
 @Composable
-private fun SidebarButton(label: String, color: Color = MaterialTheme.colors.primary, onClick: () -> Unit) {
+private fun SidebarButton(
+    label: String,
+    color: Color = MaterialTheme.colors.primary,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(backgroundColor = color),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp)
     ) {
         Text(label, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), color = Color.White)
     }
@@ -581,14 +688,27 @@ private fun ScoringGrid(
 }
 
 @Composable
-private fun SweetSpotBonusButton(bonusOn: Boolean, onToggle: () -> Unit) {
+private fun SweetSpotBonusButton(bonusOn: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
     Button(
         onClick = onToggle,
         colors = ButtonDefaults.buttonColors(
             backgroundColor = if (bonusOn) Color(0xFF2E7D32) else Color.LightGray
         ),
-        modifier = Modifier.fillMaxWidth().height(50.dp)
+        modifier = modifier.height(50.dp)
     ) {
         Text("Sweet Spot Bonus (${if (bonusOn) "ON" else "OFF"})", color = Color.White)
+    }
+}
+
+@Composable
+private fun AllRollersButton(enabled: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    Button(
+        onClick = onToggle,
+        colors = ButtonDefaults.buttonColors(
+            backgroundColor = if (enabled) Color(0xFF2E7D32) else Color.LightGray
+        ),
+        modifier = modifier.height(50.dp)
+    ) {
+        Text("All Rollers (${if (enabled) "ON" else "OFF"})", color = Color.White)
     }
 }

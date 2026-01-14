@@ -77,6 +77,8 @@ expect fun generateFireballXlsx(participants: List<FireballParticipant>, templat
 expect fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateThrowNGoXlsx(participants: List<ThrowNGoParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateBytes: ByteArray): ByteArray
+// Spaced Out XLSX export
+expect fun generateSpacedOutXlsx(participants: List<SpacedOutExportParticipant>, templateBytes: ByteArray): ByteArray
 
 // From GameImporter.kt
 expect fun parseXlsxRows(bytes: ByteArray): List<List<String>>
@@ -122,12 +124,23 @@ private data class ColumnExtractor(
     val clubDivisionIdx: Int
 ) {
     fun extract(rows: List<List<String>>): List<ImportedParticipant> {
-        // Skip header - find first row that looks like data or just skip the header line
+        // Try to locate the header row (preferred) using expected column names.
         val headerIndex = rows.indexOfFirst { row ->
             val r = row.map { it.trim().lowercase() }
             r.contains("handler") || r.contains("dog")
         }
-        val dataRows = if (headerIndex >= 0) rows.drop(headerIndex + 1) else rows
+
+        // Fallback: some exported templates may not preserve the header as plain strings
+        // (e.g., empty leading rows, merged cells, or odd formatting on Android/POI).
+        // In that case, treat the first "data-looking" row as the start of data.
+        val dataRows = when {
+            headerIndex >= 0 -> rows.drop(headerIndex + 1)
+            else -> rows.dropWhile { row ->
+                // Skip blank-ish rows; stop at the first row that looks like participant data
+                // (at least 2 non-empty cells).
+                row.count { it.trim().isNotEmpty() } < 2
+            }
+        }
 
         return dataRows.mapNotNull { row ->
             val handler = row.getOrNull(handlerIdx)?.trim().orEmpty()
@@ -167,3 +180,19 @@ private data class ColumnExtractor(
         }
     }
 }
+
+@kotlinx.serialization.Serializable
+data class SpacedOutExportParticipant(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val zonesCaught: Int,
+    val spacedOut: Int,
+    val misses: Int,
+    val ob: Int,
+    /** 1 for sweet spot yes, 0 for no (keeps export stable across platforms) */
+    val sweetSpot: Int,
+    /** 1 for all rollers yes, 0 for no */
+    val allRollers: Int,
+    val heightDivision: String = ""
+)

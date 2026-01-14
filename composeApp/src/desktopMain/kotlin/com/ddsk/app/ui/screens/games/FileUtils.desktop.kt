@@ -478,3 +478,57 @@ actual fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateB
         ByteArray(0)
     }
 }
+
+actual fun generateSpacedOutXlsx(participants: List<SpacedOutExportParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 in Excel (0-based)
+
+        val sorted = participants.sortedWith(
+            compareByDescending<SpacedOutExportParticipant> { itScore(it) }
+                .thenByDescending { it.spacedOut }
+                .thenBy { it.misses }
+        )
+
+        sorted.forEachIndexed { index, p ->
+            val rowNum = startRow + index
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+
+            row.createCell(0).setCellValue(1.0)
+            row.createCell(1).setCellValue(p.handler)
+            row.createCell(2).setCellValue(p.dog)
+            row.createCell(3).setCellValue(p.utn)
+
+            row.createCell(4).setCellValue(p.zonesCaught.toDouble())
+            row.createCell(5).setCellValue(p.spacedOut.toDouble())
+            row.createCell(6).setCellValue(p.misses.toDouble())
+
+            // Column I (index 8): Sweet Spot (Y/N)
+            row.createCell(8).setCellValue(if (p.sweetSpot != 0) "Y" else "N")
+
+            // Column K (index 10): All Rollers (Y/N)
+            row.createCell(10).setCellValue(if (p.allRollers != 0) "Y" else "N")
+
+            // Column N (index 13): Clean Spaced Out (Y/N)
+            val clean = (p.spacedOut >= 1 && p.misses == 0 && p.ob == 0)
+            row.createCell(13).setCellValue(if (clean) "Y" else "N")
+
+            // Column O (index 14): Height Division
+            row.createCell(14).setCellValue(p.heightDivision)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
+private fun itScore(p: SpacedOutExportParticipant): Int {
+    return p.zonesCaught * 5 + p.spacedOut * 25 + (if (p.sweetSpot != 0) 5 else 0)
+}

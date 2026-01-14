@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -30,7 +33,8 @@ enum class SpacedOutZone(val label: String) {
 data class SpacedOutParticipant(
     val handler: String,
     val dog: String,
-    val utn: String
+    val utn: String,
+    val heightDivision: String = ""
 ) {
     fun displayName(): String = buildString {
         if (handler.isNotBlank()) append(handler.trim())
@@ -49,7 +53,8 @@ data class SpacedOutRoundResult(
     val zonesCaught: Int,
     val misses: Int,
     val ob: Int,
-    val sweetSpotBonus: Boolean
+    val sweetSpotBonus: Boolean,
+    val allRollers: Boolean
 )
 
 @Serializable
@@ -63,9 +68,11 @@ data class SpacedOutUiState(
     val misses: Int = 0,
     val ob: Int = 0,
     val sweetSpotBonus: Boolean = false,
+    val allRollers: Boolean = false,
     val fieldFlipped: Boolean = false,
     val clickedZones: Set<SpacedOutZone> = emptySet(),
     val logEntries: List<String> = emptyList(),
+    val currentParticipantLog: List<String> = emptyList(),
     // React parity: prevent clicking the same zone twice in a row.
     val lastZoneClicked: SpacedOutZone? = null
 )
@@ -120,6 +127,7 @@ class SpacedOutScreenModel : ScreenModel {
     val activeParticipant: StateFlow<SpacedOutParticipant?> = _uiState.map { it.activeParticipant }.stateIn(scope, SharingStarted.Eagerly, null)
     val participantQueue: StateFlow<List<SpacedOutParticipant>> = _uiState.map { it.queue }.stateIn(scope, SharingStarted.Eagerly, emptyList())
     val logEntries: StateFlow<List<String>> = _uiState.map { it.logEntries }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    val allRollersOn: StateFlow<Boolean> = _uiState.map { it.allRollers }.stateIn(scope, SharingStarted.Eagerly, false)
 
     private var dataStore: DataStore? = null
     private val persistenceKey = "SpacedOutData.json"
@@ -217,6 +225,12 @@ class SpacedOutScreenModel : ScreenModel {
         persistState()
     }
 
+    fun toggleAllRollers() {
+        _uiState.update { it.copy(allRollers = !it.allRollers) }
+        appendLog("All Rollers toggled")
+        persistState()
+    }
+
     fun incrementMisses() {
         _uiState.update { currentState ->
             val newMisses = currentState.misses + 1
@@ -250,13 +264,34 @@ class SpacedOutScreenModel : ScreenModel {
 
     fun reset() {
         stopTimer()
-        _uiState.value = SpacedOutUiState()
+        _uiState.update { s ->
+            s.copy(
+                score = 0,
+                spacedOutCount = 0,
+                zonesCaught = 0,
+                misses = 0,
+                ob = 0,
+                sweetSpotBonus = false,
+                allRollers = false,
+                fieldFlipped = false,
+                clickedZones = emptySet(),
+                currentParticipantLog = emptyList(),
+                lastZoneClicked = null
+            )
+        }
         appendLog("Round reset")
         persistState()
     }
 
+    fun clearParticipants() {
+        stopTimer()
+        _uiState.value = SpacedOutUiState()
+        appendLog("Participants cleared")
+        persistState()
+    }
+
     fun addParticipant(handler: String, dog: String, utn: String) {
-        val participant = SpacedOutParticipant(handler, dog, utn)
+        val participant = SpacedOutParticipant(handler = handler, dog = dog, utn = utn, heightDivision = "")
         _uiState.update { currentState ->
             if (currentState.activeParticipant == null) {
                 currentState.copy(activeParticipant = participant)
@@ -269,39 +304,174 @@ class SpacedOutScreenModel : ScreenModel {
         persistState()
     }
 
-    fun clearParticipants() {
-        _uiState.value = SpacedOutUiState()
-        reset()
-        appendLog("Participants cleared")
+    private fun logEvent(message: String) {
+        val ts = Clock.System.now().toString()
+        _uiState.update { s ->
+            s.copy(currentParticipantLog = (s.currentParticipantLog + "$ts: $message").takeLast(300))
+        }
+    }
+
+    private fun appendLog(message: String) {
+        logCounter = (logCounter + 1) % 10000
+        val team = _uiState.value.activeParticipant?.displayName() ?: "No team"
+        val entry = "#${logCounter.toString().padStart(4, '0')} [$team] $message"
+        _uiState.update {
+            it.copy(
+                logEntries = listOf(entry) + it.logEntries,
+                currentParticipantLog = (it.currentParticipantLog + entry).takeLast(300)
+            )
+        }
+    }
+
+    private fun buildRoundResult(participant: SpacedOutParticipant): SpacedOutRoundResult =
+        SpacedOutRoundResult(
+            participant = participant,
+            score = _uiState.value.score,
+            spacedOutCount = _uiState.value.spacedOutCount,
+            zonesCaught = _uiState.value.zonesCaught,
+            misses = _uiState.value.misses,
+            ob = _uiState.value.ob,
+            sweetSpotBonus = _uiState.value.sweetSpotBonus,
+            allRollers = _uiState.value.allRollers
+        )
+
+    fun startTimer(durationSeconds: Int = DEFAULT_TIMER_SECONDS) {
+        if (_timerRunning.value) return
+        _timeLeft.value = durationSeconds
+        _timerRunning.value = true
+        timerJob?.cancel()
+        timerJob = scope.launch {
+            while (_timeLeft.value > 0 && _timerRunning.value) {
+                delay(1000)
+                _timeLeft.update { (it - 1).coerceAtLeast(0) }
+            }
+            _timerRunning.value = false
+        }
+        persistState()
+    }
+
+    fun stopTimer() {
+        timerJob?.cancel()
+        timerJob = null
+        _timerRunning.value = false
+        persistState()
+    }
+
+    fun resetTimer() {
+        stopTimer()
+        _timeLeft.value = 0
+        persistState()
+    }
+
+    fun skipParticipant() {
+        val active = _uiState.value.activeParticipant ?: return
+        // Rotate active to end of queue (no save)
+        _uiState.update { s ->
+            val rotated = s.queue + active
+            val nextActive = rotated.firstOrNull()
+            val nextQueue = if (nextActive != null) rotated.drop(1) else emptyList()
+
+            s.copy(
+                activeParticipant = nextActive,
+                queue = nextQueue,
+                score = 0,
+                spacedOutCount = 0,
+                zonesCaught = 0,
+                misses = 0,
+                ob = 0,
+                sweetSpotBonus = false,
+                allRollers = false,
+                fieldFlipped = false,
+                clickedZones = emptySet(),
+                currentParticipantLog = emptyList(),
+                lastZoneClicked = null
+            )
+        }
+        appendLog("Skipped participant")
+        persistState()
+    }
+
+    fun previousParticipant() {
+        val current = _uiState.value.activeParticipant ?: return
+        val queue = _uiState.value.queue
+        if (queue.isEmpty()) return
+
+        val last = queue.last()
+        val remaining = queue.dropLast(1)
+
+        _uiState.update { s ->
+            s.copy(
+                activeParticipant = last,
+                queue = listOf(current) + remaining,
+                score = 0,
+                spacedOutCount = 0,
+                zonesCaught = 0,
+                misses = 0,
+                ob = 0,
+                sweetSpotBonus = false,
+                allRollers = false,
+                fieldFlipped = false,
+                clickedZones = emptySet(),
+                currentParticipantLog = emptyList(),
+                lastZoneClicked = null
+            )
+        }
+        appendLog("Previous participant")
+        persistState()
+    }
+
+    private fun applyImportedPlayers(players: List<SpacedOutParticipant>) {
+        if (players.isEmpty()) return
+        _uiState.update { s ->
+            s.copy(
+                activeParticipant = players.first(),
+                queue = players.drop(1),
+                completed = emptyList(),
+                score = 0,
+                spacedOutCount = 0,
+                zonesCaught = 0,
+                misses = 0,
+                ob = 0,
+                sweetSpotBonus = false,
+                allRollers = false,
+                fieldFlipped = false,
+                clickedZones = emptySet(),
+                currentParticipantLog = emptyList(),
+                lastZoneClicked = null
+            )
+        }
+        appendLog("Imported ${players.size} teams")
         persistState()
     }
 
     fun importParticipantsFromCsv(csvText: String) {
         val imported = parseCsv(csvText)
-        val players = imported.map { SpacedOutParticipant(it.handler, it.dog, it.utn) }
+        val players = imported.map { SpacedOutParticipant(it.handler, it.dog, it.utn, it.heightDivision) }
+        if (players.isEmpty()) {
+            appendLog("Import CSV: 0 participants (check file format)")
+            persistState()
+            return
+        }
         applyImportedPlayers(players)
+        appendLog("Imported ${players.size} participants from CSV")
+        persistState()
     }
 
     fun importParticipantsFromXlsx(xlsxData: ByteArray) {
         val imported = parseXlsx(xlsxData)
-        val players = imported.map { SpacedOutParticipant(it.handler, it.dog, it.utn) }
+        val players = imported.map { SpacedOutParticipant(it.handler, it.dog, it.utn, it.heightDivision) }
+        if (players.isEmpty()) {
+            appendLog("Import XLSX: 0 participants (check sheet + headers)")
+            persistState()
+            return
+        }
         applyImportedPlayers(players)
-    }
-
-    private fun applyImportedPlayers(players: List<SpacedOutParticipant>) {
-        if (players.isEmpty()) return
-        _uiState.value = SpacedOutUiState(
-            activeParticipant = players.first(),
-            queue = players.drop(1)
-        )
-        // Reset logs/history if needed
-        appendLog("Imported ${players.size} teams")
-        reset()
+        appendLog("Imported ${players.size} participants from XLSX")
         persistState()
     }
 
     fun exportParticipantsAsCsv(): String {
-        val header = "Handler,Dog,UTN,Score,SpacedOut,ZonesCaught,Misses,OB,SweetSpot"
+        val header = "Handler,Dog,UTN,Score,SpacedOut,ZonesCaught,Misses,OB,SweetSpot,AllRollers"
         val rows = buildList {
             _uiState.value.activeParticipant?.let { add(buildRoundResult(it)) }
             _uiState.value.queue.forEach { participant ->
@@ -313,7 +483,8 @@ class SpacedOutScreenModel : ScreenModel {
                         zonesCaught = 0,
                         misses = 0,
                         ob = 0,
-                        sweetSpotBonus = false
+                        sweetSpotBonus = false,
+                        allRollers = false
                     )
                 )
             }
@@ -333,7 +504,8 @@ class SpacedOutScreenModel : ScreenModel {
                         result.zonesCaught,
                         result.misses,
                         result.ob,
-                        if (result.sweetSpotBonus) 1 else 0
+                        if (result.sweetSpotBonus) 1 else 0,
+                        if (result.allRollers) 1 else 0
                     ).joinToString(",")
                 )
             }
@@ -342,136 +514,182 @@ class SpacedOutScreenModel : ScreenModel {
 
     fun exportLog(): String = logEntries.value.joinToString(separator = "\n")
 
+    private val exportJson = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        prettyPrint = true
+        prettyPrintIndent = "  "
+    }
+
+    @Serializable
+    data class PendingJsonExport(
+        val filename: String,
+        val content: String
+    )
+
+    private val _pendingJsonExport = MutableStateFlow<PendingJsonExport?>(null)
+    val pendingJsonExport: StateFlow<PendingJsonExport?> = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
+
     fun nextParticipant() {
         val active = _uiState.value.activeParticipant ?: return
-        _uiState.update { currentState ->
-            val updatedCompleted = currentState.completed + buildRoundResult(active)
-            val updatedQueue = currentState.queue.drop(1)
-            val nextActive = updatedQueue.firstOrNull()
-            currentState.copy(
-                completed = updatedCompleted,
-                activeParticipant = nextActive,
-                queue = updatedQueue
-            )
-        }
-        appendLog("Completed ${active.displayName()}")
-        persistState()
-    }
+        val result = buildRoundResult(active)
 
-    fun skipParticipant() {
-        val active = _uiState.value.activeParticipant ?: return
-        _uiState.update { currentState ->
-            val updatedQueue = currentState.queue + active
-            val nextActive = updatedQueue.firstOrNull()
-            currentState.copy(
-                activeParticipant = nextActive,
-                queue = updatedQueue
-            )
-        }
-        appendLog("Skipped ${active.displayName()}")
-        persistState()
-    }
-
-    fun previousParticipant() {
-        val current = _uiState.value.activeParticipant ?: return
-        val queue = _uiState.value.queue
-        if (queue.isEmpty()) return
-        val last = queue.last()
-        val remaining = queue.dropLast(1)
-        _uiState.update { currentState ->
-            currentState.copy(
-                activeParticipant = last,
-                queue = listOf(current) + remaining
-            )
-        }
-        reset()
-        appendLog("Moved to previous participant")
-        persistState()
-    }
-
-    fun startTimer(durationSeconds: Int = DEFAULT_TIMER_SECONDS) {
-        if (_timerRunning.value) return
-        _timeLeft.value = durationSeconds
-        _timerRunning.value = true
-        timerJob?.cancel()
-        timerJob = scope.launch {
-            while (_timeLeft.value > 0 && _timerRunning.value) {
-                delay(1000)
-                _timeLeft.update { (it - 1).coerceAtLeast(0) }
+        runCatching {
+            val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+            fun pad2(n: Int) = n.toString().padStart(2, '0')
+            val stamp = buildString {
+                append(now.year)
+                append(pad2(now.monthNumber))
+                append(pad2(now.dayOfMonth))
+                append('_')
+                append(pad2(now.hour))
+                append(pad2(now.minute))
+                append(pad2(now.second))
             }
-            _timerRunning.value = false
-        }
-        appendLog("Timer started")
-    }
+            val safeHandler = active.handler.trim().replace("\\s+".toRegex(), "_")
+            val safeDog = active.dog.trim().replace("\\s+".toRegex(), "_")
+            val filename = "SpacedOut_${safeHandler}_${safeDog}_$stamp.json"
 
-    fun stopTimer() {
-        if (!_timerRunning.value && timerJob == null) return
-        timerJob?.cancel()
-        timerJob = null
-        _timerRunning.value = false
-        appendLog("Timer stopped")
-    }
+            val exportData = SpacedOutRoundExport(
+                gameMode = "SpacedOut",
+                exportTimestamp = Clock.System.now().toString(),
+                participant = SpacedOutParticipantExport(
+                    handler = active.handler,
+                    dog = active.dog,
+                    utn = active.utn,
+                    heightDivision = active.heightDivision
+                ),
+                roundResults = SpacedOutRoundResultsExport(
+                    zonesCaught = result.zonesCaught,
+                    score = result.score,
+                    spacedOut = result.spacedOutCount,
+                    misses = result.misses,
+                    ob = result.ob,
+                    sweetSpotAchieved = result.sweetSpotBonus,
+                    allRollersAchieved = result.allRollers
+                ),
+                roundLog = _uiState.value.currentParticipantLog
+            )
 
-    fun resetTimer() {
-        stopTimer()
-        _timeLeft.value = 0
-        appendLog("Timer reset")
-    }
-
-    // override fun onDispose() handled in base with scope.cancel()
-    private fun disposeTimer() {
-        timerJob?.cancel()
-        timerJob = null
-    }
-
-    private fun awardSpacedOutBonus() {
-        _uiState.update { currentState ->
-            val newScore = currentState.score + SPACED_OUT_COMPLETION_BONUS
-            currentState.copy(
-                score = newScore,
-                spacedOutCount = currentState.spacedOutCount + 1
+            _pendingJsonExport.value = PendingJsonExport(
+                filename = filename,
+                content = exportJson.encodeToString(exportData)
             )
         }
-        appendLog("Spaced Out achieved")
-        resetRoundState()
-        persistState()
-    }
 
-    private fun resetRoundState() {
-        _uiState.update { currentState ->
-            currentState.copy(queue = emptyList(), activeParticipant = null)
+        _uiState.update { s ->
+            val remainingQueue = s.queue
+            val nextActive = remainingQueue.firstOrNull()
+            val nextQueue = if (nextActive != null) remainingQueue.drop(1) else emptyList()
+
+            s.copy(
+                completed = s.completed + result,
+                activeParticipant = nextActive,
+                queue = nextQueue,
+                score = 0,
+                spacedOutCount = 0,
+                zonesCaught = 0,
+                misses = 0,
+                ob = 0,
+                sweetSpotBonus = false,
+                allRollers = false,
+                fieldFlipped = false,
+                clickedZones = emptySet(),
+                currentParticipantLog = emptyList(),
+                lastZoneClicked = null
+            )
         }
+
+        appendLog("Next participant")
         persistState()
     }
 
-    private fun buildRoundResult(participant: SpacedOutParticipant): SpacedOutRoundResult =
-        SpacedOutRoundResult(
-            participant = participant,
-            score = _uiState.value.score,
-            spacedOutCount = _uiState.value.spacedOutCount,
-            zonesCaught = _uiState.value.zonesCaught,
-            misses = _uiState.value.misses,
-            ob = _uiState.value.ob,
-            sweetSpotBonus = _uiState.value.sweetSpotBonus
-        )
+    @Serializable
+    private data class SpacedOutParticipantExport(
+        val handler: String,
+        val dog: String,
+        val utn: String,
+        val heightDivision: String = ""
+    )
 
-    private fun appendLog(message: String) {
-        logCounter = (logCounter + 1) % 10000
-        val team = _uiState.value.activeParticipant?.displayName() ?: "No team"
-        val entry = "#${logCounter.toString().padStart(4, '0')} [$team] $message"
-        _uiState.update { it.copy(logEntries = listOf(entry) + it.logEntries) }
-    }
+    @Serializable
+    private data class SpacedOutRoundResultsExport(
+        val zonesCaught: Int,
+        val score: Int,
+        val spacedOut: Int,
+        val misses: Int,
+        val ob: Int,
+        val sweetSpotAchieved: Boolean,
+        val allRollersAchieved: Boolean
+    )
 
-    private fun seedSampleParticipants() {
-        val sample = listOf(
-            SpacedOutParticipant("Alex Vega", "Bolt", "UTN-001"),
-            SpacedOutParticipant("Jamie Reed", "Skye", "UTN-002"),
-            SpacedOutParticipant("Morgan Lee", "Nova", "UTN-003")
-        )
-        _uiState.value = SpacedOutUiState(
-            activeParticipant = sample.firstOrNull(),
-            queue = sample.drop(1)
-        )
+    @Serializable
+    private data class SpacedOutRoundExport(
+        val gameMode: String,
+        val exportTimestamp: String,
+        val participant: SpacedOutParticipantExport,
+        val roundResults: SpacedOutRoundResultsExport,
+        val roundLog: List<String> = emptyList()
+    )
+
+    fun exportParticipantsAsXlsx(templateBytes: ByteArray): ByteArray {
+        val exportRows = buildList {
+            addAll(_uiState.value.completed.map {
+                SpacedOutExportParticipant(
+                    handler = it.participant.handler,
+                    dog = it.participant.dog,
+                    utn = it.participant.utn,
+                    zonesCaught = it.zonesCaught,
+                    spacedOut = it.spacedOutCount,
+                    misses = it.misses,
+                    ob = it.ob,
+                    sweetSpot = if (it.sweetSpotBonus) 1 else 0,
+                    allRollers = if (it.allRollers) 1 else 0,
+                    heightDivision = it.participant.heightDivision
+                )
+            })
+
+            _uiState.value.activeParticipant?.let { active ->
+                val r = buildRoundResult(active)
+                add(
+                    SpacedOutExportParticipant(
+                        handler = active.handler,
+                        dog = active.dog,
+                        utn = active.utn,
+                        zonesCaught = r.zonesCaught,
+                        spacedOut = r.spacedOutCount,
+                        misses = r.misses,
+                        ob = r.ob,
+                        sweetSpot = if (r.sweetSpotBonus) 1 else 0,
+                        allRollers = if (r.allRollers) 1 else 0,
+                        heightDivision = active.heightDivision
+                    )
+                )
+            }
+
+            _uiState.value.queue.forEach { p ->
+                add(
+                    SpacedOutExportParticipant(
+                        handler = p.handler,
+                        dog = p.dog,
+                        utn = p.utn,
+                        zonesCaught = 0,
+                        spacedOut = 0,
+                        misses = 0,
+                        ob = 0,
+                        sweetSpot = 0,
+                        allRollers = 0,
+                        heightDivision = p.heightDivision
+                    )
+                )
+            }
+        }
+
+        return generateSpacedOutXlsx(exportRows, templateBytes)
     }
 
     private companion object {
