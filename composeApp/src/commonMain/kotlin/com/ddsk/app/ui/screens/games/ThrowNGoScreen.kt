@@ -119,7 +119,15 @@ object ThrowNGoScreen : Screen {
                             .fillMaxHeight(),
                         verticalArrangement = Arrangement.spacedBy(columnSpacing)
                     ) {
-                        ThrowNGoScoreSummaryCard(navigator = navigator, uiState = uiState)
+                        ThrowNGoScoreSummaryCard(
+                            navigator = navigator,
+                            uiState = uiState,
+                            onUndo = screenModel::undo,
+                            onAllRollers = screenModel::toggleAllRollers,
+                            allRollersActive = uiState.scoreState.allRollersActive,
+                            onMiss = screenModel::incrementMiss,
+                            onOb = screenModel::incrementOb
+                        )
 
                         Box(modifier = Modifier.weight(1f)) {
                             ScoringGrid(onScore = screenModel::recordThrow)
@@ -129,14 +137,9 @@ object ThrowNGoScreen : Screen {
                             timerRunning = timerRunning,
                             timeLeft = timeLeft,
                             onTimerToggle = { if (timerRunning) screenModel.stopTimer() else screenModel.startTimer() },
-                            onTimerReset = screenModel::resetTimer,
                             onUndo = screenModel::undo,
                             onSweetSpot = screenModel::toggleSweetSpot,
                             sweetSpotActive = uiState.scoreState.sweetSpotActive,
-                            onAllRollers = screenModel::toggleAllRollers,
-                            allRollersActive = uiState.scoreState.allRollersActive,
-                            onMiss = screenModel::incrementMiss,
-                            onOb = screenModel::incrementOb,
                             onFlipField = screenModel::flipField,
                             onNext = screenModel::nextParticipant,
                             onSkip = screenModel::skipParticipant
@@ -243,9 +246,17 @@ object ThrowNGoScreen : Screen {
 }
 
 @Composable
-private fun ThrowNGoScoreSummaryCard(navigator: cafe.adriel.voyager.navigator.Navigator, uiState: ThrowNGoUiState) {
+private fun ThrowNGoScoreSummaryCard(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
+    uiState: ThrowNGoUiState,
+    onUndo: () -> Unit,
+    onAllRollers: () -> Unit,
+    allRollersActive: Boolean,
+    onMiss: () -> Unit,
+    onOb: () -> Unit
+) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -277,6 +288,33 @@ private fun ThrowNGoScoreSummaryCard(navigator: cafe.adriel.voyager.navigator.Na
                     style = MaterialTheme.typography.subtitle1,
                     fontWeight = FontWeight.Bold
                 )
+            }
+
+            // Action buttons moved here from the control row.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(onClick = onUndo) { Text("Undo") }
+
+                Button(
+                    onClick = onAllRollers,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = if (allRollersActive) Color(0xFF00C853) else Color(0xFF2979FF)
+                    )
+                ) {
+                    Text("All Rollers", color = Color.White)
+                }
+
+                Button(onClick = onMiss, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFD50000))) {
+                    Text("Miss", color = Color.White)
+                }
+                Button(onClick = onOb, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFFFB74D))) {
+                    Text("OB", color = Color(0xFF442800))
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
             }
         }
     }
@@ -339,14 +377,9 @@ private fun ThrowNGoControlRow(
     timerRunning: Boolean,
     timeLeft: Int,
     onTimerToggle: () -> Unit,
-    onTimerReset: () -> Unit,
     onUndo: () -> Unit,
     onSweetSpot: () -> Unit,
     sweetSpotActive: Boolean,
-    onAllRollers: () -> Unit,
-    allRollersActive: Boolean,
-    onMiss: () -> Unit,
-    onOb: () -> Unit,
     onFlipField: () -> Unit,
     onNext: () -> Unit,
     onSkip: () -> Unit
@@ -363,7 +396,6 @@ private fun ThrowNGoControlRow(
             ) {
                 Text(if (timerRunning) "${timeLeft}s" else "Timer", color = Color.White)
             }
-            Button(onClick = onTimerReset, enabled = !timerRunning) { Text("Reset") }
 
             Button(onClick = onUndo) { Text("Undo") }
 
@@ -372,20 +404,6 @@ private fun ThrowNGoControlRow(
                 colors = ButtonDefaults.buttonColors(backgroundColor = if (sweetSpotActive) Color(0xFF00C853) else Color(0xFFFF9100))
             ) {
                 Text("Sweet Spot", color = Color.White)
-            }
-
-            Button(
-                onClick = onAllRollers,
-                colors = ButtonDefaults.buttonColors(backgroundColor = if (allRollersActive) Color(0xFF00C853) else Color(0xFF2979FF))
-            ) {
-                Text("All Rollers", color = Color.White)
-            }
-
-            Button(onClick = onMiss, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFD50000))) {
-                Text("Miss", color = Color.White)
-            }
-            Button(onClick = onOb, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFFFB74D))) {
-                Text("OB", color = Color(0xFF442800))
             }
 
             Spacer(modifier = Modifier.weight(1f))

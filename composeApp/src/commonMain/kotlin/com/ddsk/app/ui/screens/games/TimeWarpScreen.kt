@@ -76,6 +76,7 @@ object TimeWarpScreen : Screen {
         val score by screenModel.score.collectAsState()
         val misses by screenModel.misses.collectAsState()
         val ob by screenModel.ob.collectAsState()
+        val canUndo by screenModel.canUndo.collectAsState()
         val clickedZones by screenModel.clickedZones.collectAsState()
         val sweetSpotClicked by screenModel.sweetSpotClicked.collectAsState()
         val allRollersClicked by screenModel.allRollersClicked.collectAsState()
@@ -140,6 +141,8 @@ object TimeWarpScreen : Screen {
                         ScoreHeader(
                             navigator = navigator,
                             score = score,
+                            misses = misses,
+                            ob = ob,
                             timer = timeRemaining,
                             isTimerRunning = isTimerRunning,
                             isAudioTimerPlaying = isAudioTimerPlaying,
@@ -147,6 +150,10 @@ object TimeWarpScreen : Screen {
                             onStartStopCountdown = {
                                 if (isTimerRunning) screenModel.stopCountdownAndAddScore() else screenModel.startCountdown()
                             },
+                            canUndo = canUndo,
+                            onUndo = { screenModel.undoLastAction() },
+                            onMiss = { screenModel.incrementMisses() },
+                            onOb = { screenModel.incrementOb() },
                             activeParticipant = activeParticipant,
                             onShowTeams = { showTeams = true },
                             onLongPressStart = { showTimeInput = true }
@@ -173,11 +180,9 @@ object TimeWarpScreen : Screen {
                         modifier = Modifier.width(320.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        StatsCard(
-                            misses = misses,
-                            ob = ob,
-                            onMiss = { screenModel.incrementMisses() },
-                            onOb = { screenModel.incrementOb() }
+                        QueueCard(
+                            active = activeParticipant,
+                            queue = participantQueue
                         )
 
                         Card(elevation = 6.dp, backgroundColor = Palette.surface, shape = RoundedCornerShape(16.dp)) {
@@ -352,11 +357,17 @@ object TimeWarpScreen : Screen {
 private fun ScoreHeader(
     navigator: cafe.adriel.voyager.navigator.Navigator,
     score: Int,
+    misses: Int,
+    ob: Int,
     timer: Float,
     isTimerRunning: Boolean,
     isAudioTimerPlaying: Boolean,
     onTimerAudioToggle: () -> Unit,
     onStartStopCountdown: () -> Unit,
+    canUndo: Boolean,
+    onUndo: () -> Unit,
+    onMiss: () -> Unit,
+    onOb: () -> Unit,
     activeParticipant: TimeWarpParticipant?,
     onShowTeams: () -> Unit,
     onLongPressStart: () -> Unit
@@ -406,7 +417,29 @@ private fun ScoreHeader(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ScoreBox(label = "Score", value = score.toString(), modifier = Modifier.fillMaxWidth())
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ScoreBox(label = "Score", value = score.toString(), modifier = Modifier.weight(1f))
+
+                    Button(onClick = onMiss, modifier = Modifier.width(120.dp)) {
+                        Text("Miss: $misses")
+                    }
+
+                    Button(onClick = onOb, modifier = Modifier.width(120.dp)) {
+                        Text("OB: $ob")
+                    }
+
+                    Button(
+                        onClick = onUndo,
+                        enabled = canUndo,
+                        modifier = Modifier.width(92.dp)
+                    ) {
+                        Text("Undo")
+                    }
+                }
             }
         }
     }
@@ -545,11 +578,6 @@ private fun FieldGrid(
                                         color = fg,
                                         fontWeight = FontWeight.Bold
                                     )
-                                    Text(
-                                        text = if (clicked) "Clicked" else "Tap",
-                                        color = fg,
-                                        fontSize = 12.sp
-                                    )
                                 }
                             }
                         }
@@ -573,21 +601,6 @@ private fun BottomControls(
         Button(onClick = onSkip, modifier = Modifier.width(110.dp)) { Text("Skip") }
         Button(onClick = onAllRollers, modifier = Modifier.width(150.dp)) { Text(if (allRollersActive) "All Rollers (On)" else "All Rollers") }
         Button(onClick = onNext, modifier = Modifier.width(110.dp)) { Text("Next") }
-    }
-}
-
-@Composable
-private fun StatsCard(
-    misses: Int,
-    ob: Int,
-    onMiss: () -> Unit,
-    onOb: () -> Unit
-) {
-    Column {
-        Text("Misses: $misses")
-        Button(onClick = onMiss) { Text("Miss +") }
-        Text("OB: $ob")
-        Button(onClick = onOb) { Text("OB +") }
     }
 }
 
@@ -641,4 +654,57 @@ private fun Float.formatTime(): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+}
+
+@Composable
+private fun QueueCard(
+    active: TimeWarpParticipant?,
+    queue: List<TimeWarpParticipant>
+) {
+    // Show all teams that do NOT have scoring data attached.
+    // Include the active team if it also has no result yet.
+    val pendingTeams = buildList {
+        if (active?.result == null) {
+            active?.let { add(it) }
+        }
+        addAll(queue.filter { it.result == null })
+    }
+
+    Card(
+        elevation = 6.dp,
+        backgroundColor = Palette.surface,
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Queue", color = Palette.onSurfaceVariant, fontSize = 12.sp)
+
+            if (pendingTeams.isEmpty()) {
+                Text(
+                    text = "No teams pending",
+                    color = Palette.onSurface,
+                    fontSize = 14.sp
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp)
+                ) {
+                    itemsIndexed(pendingTeams) { idx, team ->
+                        val prefix = if (idx == 0 && active == team) "Active: " else "${idx + 1}. "
+                        Text(
+                            text = prefix + (team.displayName),
+                            color = Palette.onSurface,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

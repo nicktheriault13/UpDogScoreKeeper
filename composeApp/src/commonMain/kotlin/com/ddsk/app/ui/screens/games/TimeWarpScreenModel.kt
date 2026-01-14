@@ -71,6 +71,77 @@ class TimeWarpScreenModel : ScreenModel {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    // --- Undo support (up to last 100 actions) ---
+    @Serializable
+    private data class UndoSnapshot(
+        val score: Int,
+        val misses: Int,
+        val ob: Int,
+        val clickedZones: Set<Int>,
+        val sweetSpotClicked: Boolean,
+        val allRollersClicked: Boolean,
+        val fieldFlipped: Boolean,
+        val timeRemaining: Float,
+        val isTimerRunning: Boolean,
+        val isAudioTimerPlaying: Boolean
+    )
+
+    private val undoStack = ArrayDeque<UndoSnapshot>()
+    private val undoLimit = 100
+
+    private fun pushUndoSnapshot() {
+        val s = _uiState.value
+        if (undoStack.size >= undoLimit) undoStack.removeFirst()
+        undoStack.addLast(
+            UndoSnapshot(
+                score = s.score,
+                misses = s.misses,
+                ob = s.ob,
+                clickedZones = s.clickedZones,
+                sweetSpotClicked = s.sweetSpotClicked,
+                allRollersClicked = s.allRollersClicked,
+                fieldFlipped = s.fieldFlipped,
+                timeRemaining = s.timeRemaining,
+                isTimerRunning = s.isTimerRunning,
+                isAudioTimerPlaying = s.isAudioTimerPlaying
+            )
+        )
+    }
+
+    private fun clearUndoStack() {
+        undoStack.clear()
+    }
+
+    private val _canUndo = MutableStateFlow(false)
+    val canUndo = _canUndo.asStateFlow()
+
+    private fun refreshCanUndo() {
+        _canUndo.value = undoStack.isNotEmpty()
+    }
+
+    fun undoLastAction() {
+        val snap = undoStack.removeLastOrNull() ?: return
+        timerJob?.cancel()
+        _uiState.update {
+            it.copy(
+                score = snap.score,
+                misses = snap.misses,
+                ob = snap.ob,
+                clickedZones = snap.clickedZones,
+                sweetSpotClicked = snap.sweetSpotClicked,
+                allRollersClicked = snap.allRollersClicked,
+                fieldFlipped = snap.fieldFlipped,
+                timeRemaining = snap.timeRemaining,
+                isTimerRunning = snap.isTimerRunning,
+                isAudioTimerPlaying = snap.isAudioTimerPlaying
+            )
+        }
+
+        // We do not attempt to reconstruct timer progression; just restore the snapshot state.
+        refreshCanUndo()
+        persistState()
+    }
+
     override fun onDispose() {
         scope.cancel()
         super.onDispose()
@@ -146,6 +217,8 @@ class TimeWarpScreenModel : ScreenModel {
             }
         }
         resetRoundStateOnly()
+        clearUndoStack()
+        refreshCanUndo()
         persistState()
     }
 
@@ -261,6 +334,8 @@ class TimeWarpScreenModel : ScreenModel {
         }
 
         resetRoundStateOnly()
+        clearUndoStack()
+        refreshCanUndo()
         persistState()
     }
 
@@ -278,6 +353,8 @@ class TimeWarpScreenModel : ScreenModel {
         }
         _currentParticipantLog.value = emptyList()
         resetRoundStateOnly()
+        clearUndoStack()
+        refreshCanUndo()
         persistState()
     }
 
@@ -299,7 +376,9 @@ class TimeWarpScreenModel : ScreenModel {
     }
 
     fun toggleAudioTimer() {
+        pushUndoSnapshot()
         _uiState.update { s -> s.copy(isAudioTimerPlaying = !s.isAudioTimerPlaying) }
+        refreshCanUndo()
         persistState()
     }
 
@@ -307,12 +386,14 @@ class TimeWarpScreenModel : ScreenModel {
         if (_uiState.value.isTimerRunning) return
 
         // Reset and start countdown
+        pushUndoSnapshot()
         _uiState.update { currentState ->
             currentState.copy(
                 isTimerRunning = true,
                 timeRemaining = 60.0f
             )
         }
+        refreshCanUndo()
 
         timerJob?.cancel()
         timerJob = scope.launch {
@@ -338,6 +419,7 @@ class TimeWarpScreenModel : ScreenModel {
         timerJob?.cancel()
         val remaining = _uiState.value.timeRemaining
         val add = remaining.roundToInt().coerceAtLeast(0)
+        pushUndoSnapshot()
         _uiState.update { s ->
             s.copy(
                 isTimerRunning = false,
@@ -345,6 +427,7 @@ class TimeWarpScreenModel : ScreenModel {
                 timeRemaining = remaining
             )
         }
+        refreshCanUndo()
         persistState()
     }
 
@@ -355,6 +438,7 @@ class TimeWarpScreenModel : ScreenModel {
         val newTime = timeStr.toFloatOrNull() ?: return
         timerJob?.cancel()
         val add = newTime.roundToInt().coerceAtLeast(0)
+        pushUndoSnapshot()
         _uiState.update { s ->
             s.copy(
                 timeRemaining = newTime,
@@ -362,6 +446,7 @@ class TimeWarpScreenModel : ScreenModel {
                 score = s.score + add
             )
         }
+        refreshCanUndo()
         persistState()
     }
 
@@ -373,25 +458,31 @@ class TimeWarpScreenModel : ScreenModel {
     // --- Public API expected by the screen ---
     fun incrementMisses() {
         logEvent("Miss+")
+        pushUndoSnapshot()
         _uiState.update { currentState -> currentState.copy(misses = currentState.misses + 1) }
+        refreshCanUndo()
         persistState()
     }
 
     fun incrementOb() {
         logEvent("OB+")
+        pushUndoSnapshot()
         _uiState.update { currentState -> currentState.copy(ob = currentState.ob + 1) }
+        refreshCanUndo()
         persistState()
     }
 
     fun handleZoneClick(zone: Int) {
         if (zone !in _uiState.value.clickedZones) {
             logEvent("Zone $zone")
+            pushUndoSnapshot()
             _uiState.update { currentState ->
                 currentState.copy(
                     score = currentState.score + 5,
                     clickedZones = currentState.clickedZones + zone
                 )
             }
+            refreshCanUndo()
             persistState()
         }
     }
@@ -399,23 +490,29 @@ class TimeWarpScreenModel : ScreenModel {
     fun handleSweetSpotClick() {
         logEvent("Sweet Spot")
         if (_uiState.value.clickedZones.size >= 3) {
+            pushUndoSnapshot()
             _uiState.update { currentState ->
                 val newScore = if (!currentState.sweetSpotClicked) currentState.score + 25 else currentState.score - 25
                 currentState.copy(score = newScore, sweetSpotClicked = !currentState.sweetSpotClicked)
             }
+            refreshCanUndo()
             persistState()
         }
     }
 
     fun toggleAllRollers() {
         logEvent("All Rollers")
+        pushUndoSnapshot()
         _uiState.update { currentState -> currentState.copy(allRollersClicked = !currentState.allRollersClicked) }
+        refreshCanUndo()
         persistState()
     }
 
     fun flipField() {
         logEvent("Flip Field")
+        pushUndoSnapshot()
         _uiState.update { currentState -> currentState.copy(fieldFlipped = !currentState.fieldFlipped) }
+        refreshCanUndo()
         persistState()
     }
 
@@ -427,6 +524,9 @@ class TimeWarpScreenModel : ScreenModel {
             completed = _uiState.value.completed
         )
         timerJob?.cancel()
+
+        clearUndoStack()
+        refreshCanUndo()
         persistState()
     }
 }
