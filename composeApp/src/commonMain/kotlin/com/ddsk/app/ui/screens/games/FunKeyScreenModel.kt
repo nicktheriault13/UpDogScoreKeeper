@@ -8,7 +8,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -116,7 +115,15 @@ class FunKeyScreenModel : ScreenModel {
     }
 
     fun toggleSweetSpot() {
-        _uiState.update { it.copy(sweetSpotOn = !it.sweetSpotOn) }
+        // React behavior: toggling Sweet Spot immediately adjusts score (+2/-2)
+        _uiState.update { state ->
+            val enabling = !state.sweetSpotOn
+            val delta = if (enabling) 2 else -2
+            state.copy(
+                sweetSpotOn = enabling,
+                score = (state.score + delta).coerceAtLeast(0)
+            )
+        }
         persistState()
     }
 
@@ -125,53 +132,118 @@ class FunKeyScreenModel : ScreenModel {
         persistState()
     }
 
-    fun handleCatch(type: FunKeyZoneType, points: Int, zone: String) {
-        // Track key activations as a simple set of zone IDs
+    /**
+     * New unified scoring entrypoint used by the Compose UI.
+     *
+     * Matches the React grid behavior:
+     * - "Purple" phase: jump/tunnel buttons are enabled.
+     * - After any jump/tunnel click: switch to "Blue" phase.
+     * - "Blue" phase: key buttons are enabled (one-shot; turn green and disable).
+     * - After any key click: switch back to "Purple" phase.
+     */
+    fun handleCatch(type: FunKeyZoneType, @Suppress("UNUSED_PARAMETER") points: Int, zone: String) {
         _uiState.update { state ->
-            val activated = if (type == FunKeyZoneType.KEY) state.activatedKeys + zone else state.activatedKeys
-            state.copy(score = state.score + points, activatedKeys = activated)
+             when (type) {
+                 FunKeyZoneType.JUMP -> handleJumpCatchInternal(state, zone)
+                 FunKeyZoneType.KEY -> handleKeyCatchInternal(state, zone)
+             }
+         }
+         persistState()
+    }
+
+    private fun handleJumpCatchInternal(state: FunKeyUiState, zone: String): FunKeyUiState {
+        if (!state.isPurpleEnabled) return state
+
+        // React scoring rules:
+        // Jump3 = +3, Jump2 = +2, Jump1 = +0 (count only), Tunnel = +0 (count only)
+        val (delta, updated) = when (zone) {
+            "JUMP3" -> 3 to state.copy(jump3Count = state.jump3Count + 1)
+            "JUMP3B" -> 3 to state.copy(jump3bCount = state.jump3bCount + 1)
+            "JUMP2" -> 2 to state.copy(jump2Count = state.jump2Count + 1)
+            "JUMP2B" -> 2 to state.copy(jump2bCount = state.jump2bCount + 1)
+            "JUMP1" -> 0 to state.copy(jump1Count = state.jump1Count + 1)
+            "TUNNEL" -> 0 to state.copy(tunnelCount = state.tunnelCount + 1)
+            else -> 0 to state
         }
-        persistState()
+
+        // Phase transition: purple -> blue after a jump/tunnel
+        return updated.copy(
+            score = updated.score + delta,
+            isPurpleEnabled = false,
+            isBlueEnabled = true
+        )
+    }
+
+    private fun handleKeyCatchInternal(state: FunKeyUiState, zone: String): FunKeyUiState {
+        if (!state.isBlueEnabled) return state
+        if (zone in state.activatedKeys) return state // one-shot keys
+
+        val (points, updated) = when (zone) {
+            "KEY1" -> 1 to state.copy(key1Count = state.key1Count + 1)
+            "KEY2" -> 2 to state.copy(key2Count = state.key2Count + 1)
+            "KEY3" -> 3 to state.copy(key3Count = state.key3Count + 1)
+            "KEY4" -> 4 to state.copy(key4Count = state.key4Count + 1)
+            else -> 0 to state
+        }
+
+        // Phase transition: blue -> purple after a key
+        return updated.copy(
+            score = updated.score + points,
+            activatedKeys = updated.activatedKeys + zone,
+            isBlueEnabled = false,
+            isPurpleEnabled = true
+        )
     }
 
     // Keeping old helper methods for any other UI calls
     fun handleJump(id: String) {
-        if (!isPurpleEnabled.value) return
-        _uiState.update { state ->
-            val points = 2
-            val newScore = state.score + points
-            when (id) {
-                "J1" -> state.copy(score = newScore, jump1Count = state.jump1Count + 1)
-                "J2" -> state.copy(score = newScore, jump2Count = state.jump2Count + 1)
-                "J3" -> state.copy(score = newScore, jump3Count = state.jump3Count + 1)
-                "J2b" -> state.copy(score = newScore, jump2bCount = state.jump2bCount + 1)
-                "J3b" -> state.copy(score = newScore, jump3bCount = state.jump3bCount + 1)
-                "T" -> state.copy(score = newScore, tunnelCount = state.tunnelCount + 1)
-                else -> state
-            }
+        // Legacy IDs; keep behavior consistent with new rules.
+        val mappedZone = when (id) {
+            "J1" -> "JUMP1"
+            "J2" -> "JUMP2"
+            "J3" -> "JUMP3"
+            "J2b" -> "JUMP2B"
+            "J3b" -> "JUMP3B"
+            "T" -> "TUNNEL"
+            else -> id
         }
-        persistState()
+        handleCatch(FunKeyZoneType.JUMP, 0, mappedZone)
     }
 
     fun handleKey(id: String) {
-        if (!isBlueEnabled.value) return
-        _uiState.update { state ->
-            val points = 5
-            val newScore = state.score + points
-            val activated = state.activatedKeys + id
-            when (id) {
-                "K1" -> state.copy(score = newScore, key1Count = state.key1Count + 1, activatedKeys = activated)
-                "K2" -> state.copy(score = newScore, key2Count = state.key2Count + 1, activatedKeys = activated)
-                "K3" -> state.copy(score = newScore, key3Count = state.key3Count + 1, activatedKeys = activated)
-                "K4" -> state.copy(score = newScore, key4Count = state.key4Count + 1, activatedKeys = activated)
-                else -> state.copy(score = newScore, activatedKeys = activated)
-            }
+        // Legacy IDs; keep behavior consistent with new rules.
+        val mappedZone = when (id) {
+            "K1" -> "KEY1"
+            "K2" -> "KEY2"
+            "K3" -> "KEY3"
+            "K4" -> "KEY4"
+            else -> id
         }
-        persistState()
+        handleCatch(FunKeyZoneType.KEY, 0, mappedZone)
     }
 
     fun reset() {
-        _uiState.update { it.copy(score = 0, misses = 0, sweetSpotOn = false, activatedKeys = emptySet()) }
+        // React resetScore resets all per-run scoring state + gating
+        _uiState.update {
+            it.copy(
+                score = 0,
+                misses = 0,
+                sweetSpotOn = false,
+                activatedKeys = emptySet(),
+                isPurpleEnabled = true,
+                isBlueEnabled = false,
+                jump1Count = 0,
+                jump2Count = 0,
+                jump3Count = 0,
+                jump2bCount = 0,
+                jump3bCount = 0,
+                tunnelCount = 0,
+                key1Count = 0,
+                key2Count = 0,
+                key3Count = 0,
+                key4Count = 0
+            )
+        }
         persistState()
     }
 
@@ -193,7 +265,28 @@ class FunKeyScreenModel : ScreenModel {
             val completed = state.completed + active
             val next = state.queue.firstOrNull()
             val remaining = if (state.queue.isNotEmpty()) state.queue.drop(1) else emptyList()
-            state.copy(activeParticipant = next, queue = remaining, completed = completed, score = 0, misses = 0, sweetSpotOn = false, activatedKeys = emptySet())
+            // Move to next team and clear per-run state
+            state.copy(
+                activeParticipant = next,
+                queue = remaining,
+                completed = completed,
+                score = 0,
+                misses = 0,
+                sweetSpotOn = false,
+                activatedKeys = emptySet(),
+                isPurpleEnabled = true,
+                isBlueEnabled = false,
+                jump1Count = 0,
+                jump2Count = 0,
+                jump3Count = 0,
+                jump2bCount = 0,
+                jump3bCount = 0,
+                tunnelCount = 0,
+                key1Count = 0,
+                key2Count = 0,
+                key3Count = 0,
+                key4Count = 0
+            )
         }
         persistState()
     }
@@ -203,7 +296,27 @@ class FunKeyScreenModel : ScreenModel {
             val active = state.activeParticipant ?: return@update state
             val next = state.queue.firstOrNull()
             val remaining = if (state.queue.isNotEmpty()) state.queue.drop(1) else emptyList()
-            state.copy(activeParticipant = next, queue = remaining + active, score = 0, misses = 0, sweetSpotOn = false, activatedKeys = emptySet())
+            // Skip: send current active to back of queue and clear per-run state
+            state.copy(
+                activeParticipant = next,
+                queue = remaining + active,
+                score = 0,
+                misses = 0,
+                sweetSpotOn = false,
+                activatedKeys = emptySet(),
+                isPurpleEnabled = true,
+                isBlueEnabled = false,
+                jump1Count = 0,
+                jump2Count = 0,
+                jump3Count = 0,
+                jump2bCount = 0,
+                jump3bCount = 0,
+                tunnelCount = 0,
+                key1Count = 0,
+                key2Count = 0,
+                key3Count = 0,
+                key4Count = 0
+            )
         }
         persistState()
     }

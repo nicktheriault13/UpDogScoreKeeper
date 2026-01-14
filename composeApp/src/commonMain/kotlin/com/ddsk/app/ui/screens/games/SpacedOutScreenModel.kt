@@ -65,7 +65,9 @@ data class SpacedOutUiState(
     val sweetSpotBonus: Boolean = false,
     val fieldFlipped: Boolean = false,
     val clickedZones: Set<SpacedOutZone> = emptySet(),
-    val logEntries: List<String> = emptyList()
+    val logEntries: List<String> = emptyList(),
+    // React parity: prevent clicking the same zone twice in a row.
+    val lastZoneClicked: SpacedOutZone? = null
 )
 
 class SpacedOutScreenModel : ScreenModel {
@@ -150,41 +152,55 @@ class SpacedOutScreenModel : ScreenModel {
         }
     }
 
+    // React parity: only 4 scoring zones exist on the field UI.
+    // (We reuse the existing enum values for persistence compatibility.)
+    private val scoringZones: Set<SpacedOutZone> = setOf(
+        SpacedOutZone.Zone1, // zone1
+        SpacedOutZone.Zone2, // Sweet Spot (zone button)
+        SpacedOutZone.Zone3, // zone2
+        SpacedOutZone.Zone4  // zone3
+    )
+
     fun handleZoneClick(zone: SpacedOutZone) {
-        if (_uiState.value.activeParticipant == null) return
+         // Ignore non-scoring zones (defensive; UI should only send these 4)
+         if (zone !in scoringZones) return
 
-        val currentScore = _uiState.value.score
-        val points = zonePoints[zone] ?: return
-        val newScore = currentScore + points
+         // React parity: prevent clicking the same zone twice in a row
+         if (_uiState.value.lastZoneClicked == zone) return
 
-        _uiState.update { currentState ->
-            val zonesCaught = currentState.zonesCaught + 1
-            val clickedZones = currentState.clickedZones + zone
-            val allZonesCaught = clickedZones.size == zonePoints.size
+         _uiState.update { currentState ->
+             val newZonesCaught = currentState.zonesCaught + 1
+             val newClickedZones = currentState.clickedZones + zone
 
-            // Logic for Spaced Out Bonus? (e.g. all 15 zones)
+             // React parity: each zone is worth +5
+             var newScore = currentState.score + 5
 
-            var spacedOutCount = currentState.spacedOutCount
-            if (allZonesCaught && currentState.clickedZones.size < zonePoints.size) { // Just completed
-                 spacedOutCount += 1
-                 // Reset clicked zones? Or keep them? Usually "Spaced Out" means clear board and bonus.
-                 // Assuming Spaced Out clears clicked zones for next round.
-                 // If not, logic differs. Assuming reset based on "Spaced Out" name.
-            }
+             val allZonesClicked = scoringZones.all { it in newClickedZones }
+             val newSpacedOutCount = if (allZonesClicked) currentState.spacedOutCount + 1 else currentState.spacedOutCount
 
-            currentState.copy(
-                score = newScore,
-                zonesCaught = zonesCaught,
-                spacedOutCount = spacedOutCount,
-                clickedZones = if (allZonesCaught) emptySet() else clickedZones
-            )
-        }
-        if (_uiState.value.clickedZones.isEmpty() && _uiState.value.zonesCaught > 0) {
-             // Spaced Out triggered reset above?
-             appendLog("Spaced Out! Board Cleared.") // Example
-        }
-        persistState()
-    }
+             if (allZonesClicked) {
+                 // React parity: Spaced Out awards +25 and clears the board
+                 newScore += 25
+             }
+
+             currentState.copy(
+                 score = newScore,
+                 zonesCaught = newZonesCaught,
+                 spacedOutCount = newSpacedOutCount,
+                 clickedZones = if (allZonesClicked) emptySet() else newClickedZones,
+                 lastZoneClicked = if (allZonesClicked) null else zone
+             )
+         }
+
+         // Logging + persistence
+         if (_uiState.value.clickedZones.isEmpty() && _uiState.value.spacedOutCount > 0) {
+             appendLog("Spaced Out achieved")
+         } else {
+             appendLog("Zone ${zone.label}")
+         }
+
+         persistState()
+     }
 
     fun toggleSweetSpotBonus() {
         _uiState.update { currentState ->
@@ -464,4 +480,3 @@ class SpacedOutScreenModel : ScreenModel {
         private const val DEFAULT_TIMER_SECONDS = 60
     }
 }
-

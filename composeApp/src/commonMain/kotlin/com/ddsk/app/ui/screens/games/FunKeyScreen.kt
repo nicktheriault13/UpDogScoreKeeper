@@ -228,8 +228,8 @@ object FunKeyScreen : Screen {
                                     key3Count = key3Count,
                                     key4Count = key4Count,
                                     activatedKeys = activatedKeys,
-                                    onJump = { points, zone -> screenModel.handleCatch(FunKeyZoneType.JUMP, points, zone) },
-                                    onKey = { points, zone -> screenModel.handleCatch(FunKeyZoneType.KEY, points, zone) },
+                                    onJump = { _, zone -> screenModel.handleCatch(FunKeyZoneType.JUMP, 0, zone) },
+                                    onKey = { _, zone -> screenModel.handleCatch(FunKeyZoneType.KEY, 0, zone) },
                                     onSweetSpot = screenModel::toggleSweetSpot,
                                     modifier = Modifier.fillMaxSize()
                                 )
