@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
@@ -46,7 +48,7 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.*
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
 
@@ -144,7 +146,7 @@ object FunKeyScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize()) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the top score card (see FunKeyTopBar) to avoid overlap.
 
                 val isCompactHeight = maxHeight < 720.dp
                 val contentSpacing = if (isCompactHeight) 12.dp else 16.dp
@@ -159,6 +161,7 @@ object FunKeyScreen : Screen {
                     verticalArrangement = Arrangement.spacedBy(contentSpacing)
                 ) {
                     FunKeyTopBar(
+                        navigator = navigator,
                         isTimerRunning = isTimerRunning,
                         score = score,
                         misses = misses,
@@ -265,6 +268,7 @@ object FunKeyScreen : Screen {
 
 @Composable
 private fun FunKeyTopBar(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
     isTimerRunning: Boolean,
     score: Int,
     misses: Int,
@@ -276,40 +280,50 @@ private fun FunKeyTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            GameHomeButton(
+                navigator = navigator,
+                modifier = Modifier
+                    .height(40.dp)
+            )
+
             Button(
                 onClick = onTimerToggle,
                 colors = ButtonDefaults.buttonColors(
                     backgroundColor = if (isTimerRunning) vWarning else vPrimary,
                     contentColor = if (isTimerRunning) vWarningOn else vPrimaryOn
-                )
+                ),
+                modifier = Modifier.height(40.dp)
             ) {
-                Text(if (isTimerRunning) "Stop Timer" else "Start Timer")
+                Text(if (isTimerRunning) "Stop Timer" else "Start Timer", fontSize = 12.sp)
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text("Current Team", fontSize = 12.sp, color = mdOutline)
+                Text("Current Team", fontSize = 11.sp, color = mdOutline)
                 Text(
                     activeParticipant?.let { "${it.handler} & ${it.dog}" } ?: "No team loaded",
                     fontWeight = FontWeight.Bold,
-                    color = mdText
+                    color = mdText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text("Score", fontSize = 12.sp, color = mdOutline)
-                Text("$score", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = mdText)
+                Text("Score", fontSize = 11.sp, color = mdOutline)
+                Text("$score", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = mdText)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text("Misses", fontSize = 12.sp, color = mdOutline)
-                Text("$misses", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = mdText)
+                Text("Misses", fontSize = 11.sp, color = mdOutline)
+                Text("$misses", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = mdText)
             }
             Button(
                 onClick = onAddTeam,
-                colors = ButtonDefaults.buttonColors(backgroundColor = mdPrimaryContainer, contentColor = mdPrimary)
+                colors = ButtonDefaults.buttonColors(backgroundColor = mdPrimaryContainer, contentColor = mdPrimary),
+                modifier = Modifier.height(40.dp)
             ) {
-                Text("Add Team")
+                Text("Add Team", fontSize = 12.sp)
             }
         }
     }

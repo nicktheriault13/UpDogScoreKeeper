@@ -1,7 +1,6 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -274,7 +273,7 @@ class FarOutScreenModel(
         logEvent("Completed ${active.handler} & ${active.dog}")
         persistParticipants()
         if (autoExport) {
-            screenModelScope.launch { autoExportParticipant(updatedActive) }
+            scope.launch { autoExportParticipant(updatedActive) }
         }
     }
 

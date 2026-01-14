@@ -54,7 +54,7 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.*
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
@@ -119,10 +119,11 @@ object SpacedOutScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize()) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the header to avoid overlap.
 
                 Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     HeaderRow(
+                        navigator = navigator,
                         activeName = activeParticipant?.displayName() ?: "No team loaded",
                         score = score,
                         timeLeft = timeLeft,
@@ -223,6 +224,7 @@ object SpacedOutScreen : Screen {
 
 @Composable
 private fun HeaderRow(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
     activeName: String,
     score: Int,
     timeLeft: Int,
@@ -237,6 +239,8 @@ private fun HeaderRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            GameHomeButton(navigator = navigator)
+
             Button(
                 onClick = onTimerToggle,
                 colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) Color(0xFFFFB74D) else Color(0xFF2196F3))

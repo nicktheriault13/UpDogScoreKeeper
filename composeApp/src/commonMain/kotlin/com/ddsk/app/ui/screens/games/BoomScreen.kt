@@ -1,6 +1,5 @@
 package com.ddsk.app.ui.screens.games
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -47,7 +47,7 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.rememberDataStore
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.games.ui.ButtonPalette
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
@@ -122,7 +122,7 @@ object BoomScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize()) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the score card to avoid overlap.
                 val columnSpacing = 16.dp
                 Row(
                     modifier = Modifier
@@ -136,7 +136,7 @@ object BoomScreen : Screen {
                             .fillMaxHeight(),
                         verticalArrangement = Arrangement.spacedBy(columnSpacing)
                     ) {
-                        ScoreSummaryCard(uiState)
+                        ScoreSummaryCard(navigator = navigator, uiState)
                         Box(modifier = Modifier.weight(1f)) {
                             BoomGrid(
                                 screenModel = screenModel,
@@ -184,11 +184,18 @@ object BoomScreen : Screen {
 }
 
 @Composable
-private fun ScoreSummaryCard(uiState: BoomUiState) {
+private fun ScoreSummaryCard(navigator: cafe.adriel.voyager.navigator.Navigator, uiState: BoomUiState) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            val score = uiState.scoreBreakdown.totalScore
-            Text(text = "Score: $score", style = MaterialTheme.typography.h4)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GameHomeButton(navigator = navigator)
+                val score = uiState.scoreBreakdown.totalScore
+                Text(text = "Score: $score", style = MaterialTheme.typography.h4)
+            }
             Spacer(modifier = Modifier.heightIn(min = 4.dp))
             Text(
                 text = buildString {

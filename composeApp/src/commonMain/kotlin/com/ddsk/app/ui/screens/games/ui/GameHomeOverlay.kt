@@ -4,9 +4,11 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.navigator.Navigator
+import com.ddsk.app.ui.components.GameHomeButton
 
 /**
  * Consistent home button placement for game screens.
@@ -18,14 +20,10 @@ fun BoxScope.GameHomeOverlay(
     navigator: Navigator,
 ) {
     GameHomeButton(
-        onClick = {
-            // Pop back to the root (home) screen.
-            while (navigator.canPop) {
-                navigator.pop()
-            }
-        },
+        navigator = navigator,
         modifier = Modifier
-            .padding(8.dp)
+            .align(Alignment.TopStart)
+            .padding(12.dp)
             .size(48.dp)
     )
 }

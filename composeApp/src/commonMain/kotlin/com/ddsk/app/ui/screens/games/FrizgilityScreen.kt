@@ -38,7 +38,7 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.rememberDataStore
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 
 private val primaryBlue = Color(0xFF2979FF)
@@ -76,7 +76,7 @@ object FrizgilityScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize()) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the score card to avoid overlap.
                 val columnSpacing = 16.dp
                 Row(
                     modifier = Modifier
@@ -91,7 +91,7 @@ object FrizgilityScreen : Screen {
                             .fillMaxHeight(),
                         verticalArrangement = Arrangement.spacedBy(columnSpacing)
                     ) {
-                        FrizgilityScoreCard(uiState)
+                        FrizgilityScoreCard(navigator = navigator, uiState)
                         Box(modifier = Modifier.weight(1f)) {
                             FrizgilityGrid(screenModel, uiState)
                         }
@@ -123,12 +123,18 @@ object FrizgilityScreen : Screen {
 }
 
 @Composable
-fun FrizgilityScoreCard(uiState: FrizgilityUiState) {
+fun FrizgilityScoreCard(navigator: cafe.adriel.voyager.navigator.Navigator, uiState: FrizgilityUiState) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GameHomeButton(navigator = navigator)
                 Text(text = "Score: ${uiState.scoreBreakdown.totalScore}", style = MaterialTheme.typography.h4)
                 if (uiState.sweetSpotActive) {
+                    Spacer(modifier = Modifier.weight(1f))
                     Text("Sweet Spot!", color = boomPink, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.h6)
                 }
             }
@@ -298,4 +304,3 @@ fun FrizgilityLogCard(logs: List<String>, modifier: Modifier = Modifier) {
         }
     }
 }
-

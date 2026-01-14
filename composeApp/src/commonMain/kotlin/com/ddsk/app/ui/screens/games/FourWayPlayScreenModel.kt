@@ -1,7 +1,6 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +53,7 @@ class FourWayPlayScreenModel : ScreenModel {
         dataStore = store
         // Desktop builds don't provide Dispatchers.Main by default.
         // Keep persistence IO/deserialization off Main.
-        screenModelScope.launch(Dispatchers.Default) {
+        scope.launch {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {

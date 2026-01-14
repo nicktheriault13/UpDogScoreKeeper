@@ -1,8 +1,11 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,38 +51,45 @@ data class FunKeyUiState(
 
 class FunKeyScreenModel : ScreenModel {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
+
     private val _uiState = MutableStateFlow(FunKeyUiState())
 
     // Derived StateFlows compatible with previous UI consumption
-    val score = _uiState.map { it.score }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val misses = _uiState.map { it.misses }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val sweetSpotOn = _uiState.map { it.sweetSpotOn }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
-    val activatedKeys = _uiState.map { it.activatedKeys }.stateIn(screenModelScope, SharingStarted.Eagerly, emptySet())
+    val score = _uiState.map { it.score }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val misses = _uiState.map { it.misses }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val sweetSpotOn = _uiState.map { it.sweetSpotOn }.stateIn(scope, SharingStarted.Eagerly, false)
+    val activatedKeys = _uiState.map { it.activatedKeys }.stateIn(scope, SharingStarted.Eagerly, emptySet())
 
-    val isPurpleEnabled = _uiState.map { it.isPurpleEnabled }.stateIn(screenModelScope, SharingStarted.Eagerly, true)
-    val isBlueEnabled = _uiState.map { it.isBlueEnabled }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
+    val isPurpleEnabled = _uiState.map { it.isPurpleEnabled }.stateIn(scope, SharingStarted.Eagerly, true)
+    val isBlueEnabled = _uiState.map { it.isBlueEnabled }.stateIn(scope, SharingStarted.Eagerly, false)
 
-    val jump1Count = _uiState.map { it.jump1Count }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val jump2Count = _uiState.map { it.jump2Count }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val jump3Count = _uiState.map { it.jump3Count }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val jump2bCount = _uiState.map { it.jump2bCount }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val jump3bCount = _uiState.map { it.jump3bCount }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val tunnelCount = _uiState.map { it.tunnelCount }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    val jump1Count = _uiState.map { it.jump1Count }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val jump2Count = _uiState.map { it.jump2Count }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val jump3Count = _uiState.map { it.jump3Count }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val jump2bCount = _uiState.map { it.jump2bCount }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val jump3bCount = _uiState.map { it.jump3bCount }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val tunnelCount = _uiState.map { it.tunnelCount }.stateIn(scope, SharingStarted.Eagerly, 0)
 
-    val key1Count = _uiState.map { it.key1Count }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val key2Count = _uiState.map { it.key2Count }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val key3Count = _uiState.map { it.key3Count }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val key4Count = _uiState.map { it.key4Count }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
+    val key1Count = _uiState.map { it.key1Count }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val key2Count = _uiState.map { it.key2Count }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val key3Count = _uiState.map { it.key3Count }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val key4Count = _uiState.map { it.key4Count }.stateIn(scope, SharingStarted.Eagerly, 0)
 
-    val activeParticipant = _uiState.map { it.activeParticipant }.stateIn(screenModelScope, SharingStarted.Eagerly, null)
-    val participantQueue = _uiState.map { it.queue }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyList())
+    val activeParticipant = _uiState.map { it.activeParticipant }.stateIn(scope, SharingStarted.Eagerly, null)
+    val participantQueue = _uiState.map { it.queue }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private var dataStore: DataStore? = null
     private val persistenceKey = "FunKeyData.json"
 
     fun initPersistence(store: DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        scope.launch {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {
@@ -95,7 +105,7 @@ class FunKeyScreenModel : ScreenModel {
     private fun persistState() {
         val store = dataStore ?: return
         val state = _uiState.value
-        screenModelScope.launch {
+        scope.launch {
             try {
                 val json = Json.encodeToString(state)
                 store.save(persistenceKey, json)

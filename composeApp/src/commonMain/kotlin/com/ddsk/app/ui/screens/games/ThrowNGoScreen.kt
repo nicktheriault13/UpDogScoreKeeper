@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.material.MaterialTheme
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 
 object ThrowNGoScreen : Screen {
     @Composable
@@ -103,7 +103,7 @@ object ThrowNGoScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the score card to avoid overlap.
 
                 val columnSpacing = 16.dp
                 Row(
@@ -119,7 +119,7 @@ object ThrowNGoScreen : Screen {
                             .fillMaxHeight(),
                         verticalArrangement = Arrangement.spacedBy(columnSpacing)
                     ) {
-                        ThrowNGoScoreSummaryCard(uiState = uiState)
+                        ThrowNGoScoreSummaryCard(navigator = navigator, uiState = uiState)
 
                         Box(modifier = Modifier.weight(1f)) {
                             ScoringGrid(onScore = screenModel::recordThrow)
@@ -243,15 +243,17 @@ object ThrowNGoScreen : Screen {
 }
 
 @Composable
-private fun ThrowNGoScoreSummaryCard(uiState: ThrowNGoUiState) {
+private fun ThrowNGoScoreSummaryCard(navigator: cafe.adriel.voyager.navigator.Navigator, uiState: ThrowNGoUiState) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                GameHomeButton(navigator = navigator)
                 Text(text = "Score: ${uiState.scoreState.score}", style = MaterialTheme.typography.h4)
+                Spacer(modifier = Modifier.weight(1f))
                 Text(
                     text = "Catches: ${uiState.scoreState.catches} • Bonus: ${uiState.scoreState.bonusCatches}",
                     style = MaterialTheme.typography.body2,

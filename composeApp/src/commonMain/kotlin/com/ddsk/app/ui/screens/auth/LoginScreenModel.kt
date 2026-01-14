@@ -1,9 +1,11 @@
 package com.ddsk.app.ui.screens.auth
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.auth.AuthService
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -28,6 +30,8 @@ class LoginScreenModel(
     private val _loginState = MutableStateFlow<LoginState>(LoginState.Idle)
     val loginState = _loginState.asStateFlow()
 
+    private val coroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
     fun updateEmail(value: String) {
         _email.value = value
     }
@@ -37,8 +41,7 @@ class LoginScreenModel(
     }
 
     fun signIn() {
-        // Desktop builds don't have a Main dispatcher by default. Keep login work off Main.
-        screenModelScope.launch(Dispatchers.Default) {
+        coroutineScope.launch {
             _loginState.value = LoginState.Loading
             try {
                 authService.signIn(email.value, password.value)
@@ -47,5 +50,9 @@ class LoginScreenModel(
                 _loginState.value = LoginState.Error(e.message ?: "Unknown error")
             }
         }
+    }
+
+    fun onCleared() {
+        coroutineScope.cancel()
     }
 }

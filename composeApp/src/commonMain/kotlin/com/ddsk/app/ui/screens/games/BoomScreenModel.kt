@@ -1,7 +1,6 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
@@ -115,7 +114,7 @@ class BoomScreenModel : ScreenModel {
 
     fun initPersistence(store: DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        scope.launch {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {

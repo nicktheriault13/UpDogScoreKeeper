@@ -48,7 +48,7 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.rememberDataStore
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
 
@@ -124,7 +124,7 @@ object FourWayPlayScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize()) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the score card to avoid overlap.
                 val columnSpacing = 16.dp
                 Row(
                     modifier = Modifier
@@ -140,6 +140,7 @@ object FourWayPlayScreen : Screen {
                         verticalArrangement = Arrangement.spacedBy(columnSpacing)
                     ) {
                         ScoreSummaryCard(
+                            navigator = navigator,
                             score = score,
                             quads = quads,
                             misses = misses,
@@ -279,6 +280,7 @@ object FourWayPlayScreen : Screen {
 
 @Composable
 private fun ScoreSummaryCard(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
     score: Int,
     quads: Int,
     misses: Int,
@@ -286,7 +288,14 @@ private fun ScoreSummaryCard(
 ) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = "Score: $score", style = MaterialTheme.typography.h4)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GameHomeButton(navigator = navigator)
+                Text(text = "Score: $score", style = MaterialTheme.typography.h4)
+            }
             Spacer(modifier = Modifier.heightIn(min = 4.dp))
             Text(
                 text = "Quads: $quads • Misses: $misses",

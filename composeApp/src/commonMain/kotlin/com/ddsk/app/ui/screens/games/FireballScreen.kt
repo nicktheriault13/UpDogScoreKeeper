@@ -51,7 +51,7 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.persistence.*
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
@@ -176,11 +176,11 @@ object FireballScreen : Screen {
 
         Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                // Home button overlay
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the header row to avoid overlap.
 
                 Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
                     HeaderRow(
+                        navigator = navigator,
                         timerRunning = isTimerRunning,
                         secondsRemaining = timerSecondsRemaining,
                         onTimerToggle = {
@@ -309,6 +309,7 @@ object FireballScreen : Screen {
 
 @Composable
 private fun HeaderRow(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
     timerRunning: Boolean,
     secondsRemaining: Int,
     onTimerToggle: () -> Unit,
@@ -323,9 +324,15 @@ private fun HeaderRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
-            Text("Fire Ball", style = MaterialTheme.typography.h5, color = Palette.onSurface)
-            Text("Total Score: $totalScore", style = MaterialTheme.typography.subtitle1, color = Palette.onSurfaceVariant)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GameHomeButton(navigator = navigator)
+            Column {
+                Text("Fire Ball", style = MaterialTheme.typography.h5, color = Palette.onSurface)
+                Text("Total Score: $totalScore", style = MaterialTheme.typography.subtitle1, color = Palette.onSurfaceVariant)
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(

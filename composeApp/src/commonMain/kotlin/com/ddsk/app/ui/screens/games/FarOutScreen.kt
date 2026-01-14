@@ -63,7 +63,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.logging.rememberGameLogger
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.*
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
@@ -121,10 +121,11 @@ object FarOutScreen : Screen {
 
         Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize()) {
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the header to avoid overlap.
 
                 Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                     FarOutHeader(
+                        navigator = navigator,
                         activeName = activeParticipant?.displayName().orEmpty().ifBlank { "No team loaded" },
                         score = state.score,
                         timer = state.timerDisplay,
@@ -326,6 +327,7 @@ object FarOutScreen : Screen {
 
 @Composable
 private fun FarOutHeader(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
     activeName: String,
     score: Double,
     timer: TimerDisplay,
@@ -340,6 +342,7 @@ private fun FarOutHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            GameHomeButton(navigator = navigator)
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }

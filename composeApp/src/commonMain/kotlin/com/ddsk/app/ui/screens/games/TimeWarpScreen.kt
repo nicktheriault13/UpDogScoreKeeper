@@ -52,7 +52,7 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.*
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
@@ -124,7 +124,7 @@ object TimeWarpScreen : Screen {
 
         Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize()) {
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the score header to avoid overlap.
 
                 Row(
                     modifier = Modifier
@@ -132,9 +132,9 @@ object TimeWarpScreen : Screen {
                         .padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Left: Controls & Field
                     Column(modifier = Modifier.weight(2f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         ScoreHeader(
+                            navigator = navigator,
                             score = score,
                             timer = timeRemaining,
                             isTimerRunning = isTimerRunning,
@@ -333,6 +333,7 @@ object TimeWarpScreen : Screen {
 
 @Composable
 private fun ScoreHeader(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
     score: Int,
     timer: Float,
     isTimerRunning: Boolean,
@@ -344,6 +345,7 @@ private fun ScoreHeader(
     Card(elevation = 6.dp, backgroundColor = Palette.surface, shape = RoundedCornerShape(16.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                GameHomeButton(navigator = navigator)
                 Column(modifier = Modifier.weight(1f).clickable { onShowTeams() }) {
                     Text("Current Team", color = Palette.onSurfaceVariant, fontSize = 12.sp)
                     Text(

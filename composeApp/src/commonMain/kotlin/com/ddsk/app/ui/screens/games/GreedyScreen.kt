@@ -40,7 +40,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.rememberDataStore
 import com.ddsk.app.persistence.*
-import com.ddsk.app.ui.screens.games.ui.GameHomeOverlay
+import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -118,7 +118,7 @@ object GreedyScreen : Screen {
 
         Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize()) {
-                GameHomeOverlay(navigator = navigator)
+                // Home button is rendered inside the score card to avoid overlap.
 
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                     val columnSpacing = 16.dp
@@ -136,6 +136,7 @@ object GreedyScreen : Screen {
                             verticalArrangement = Arrangement.spacedBy(columnSpacing)
                         ) {
                             GreedyScoreSummaryCard(
+                                navigator = navigator,
                                 handlerDog = participants.firstOrNull()?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
                                 throwZone = throwZone,
                                 score = score,
@@ -312,6 +313,7 @@ object GreedyScreen : Screen {
 
 @Composable
 private fun GreedyScoreSummaryCard(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
     handlerDog: String,
     throwZone: Int,
     score: Int,
@@ -321,8 +323,14 @@ private fun GreedyScoreSummaryCard(
 ) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GameHomeButton(navigator = navigator)
                 Text(text = "Score: $score", style = MaterialTheme.typography.h4)
+                Spacer(modifier = Modifier.weight(1f))
                 Text(
                     text = "Throw Zone: $throwZone",
                     style = MaterialTheme.typography.body2,

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -23,9 +22,6 @@ import androidx.compose.material.LinearProgressIndicator
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -42,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import com.ddsk.app.ui.components.HomeButtonFrame
 import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.ui.theme.Palette
 import kotlin.math.max
@@ -52,13 +49,15 @@ object TimersScreen : Screen {
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
         Surface(modifier = Modifier.fillMaxSize(), color = Palette.background) {
-            TimersContent(onNavigateHome = { if (navigator.canPop) navigator.pop() })
+            HomeButtonFrame(navigator = navigator) {
+                TimersContent()
+            }
         }
     }
 }
 
 @Composable
-private fun TimersContent(onNavigateHome: () -> Unit) {
+private fun TimersContent() {
     var currentGame by remember { mutableStateOf<TimerGameDef?>(null) }
     var currentAsset by remember { mutableStateOf(DEFAULT_TIMER_ASSET) }
     var playerState by remember { mutableStateOf(TimerPlayerState.Stopped) }
@@ -132,12 +131,13 @@ private fun TimersContent(onNavigateHome: () -> Unit) {
             columns = GridCells.Fixed(columns),
             modifier = Modifier.fillMaxSize(),
             state = lazyGridState,
+            // Home button frame already provides base padding.
             contentPadding = PaddingValues(horizontal = if (isPhone) 12.dp else 24.dp, vertical = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                TimersHeader(isPhone = isPhone, onNavigateHome = onNavigateHome)
+                TimersHeader(isPhone = isPhone)
             }
 
             if (playerState != TimerPlayerState.Stopped && currentGame != null) {
@@ -167,24 +167,8 @@ private fun TimersContent(onNavigateHome: () -> Unit) {
 }
 
 @Composable
-private fun TimersHeader(isPhone: Boolean, onNavigateHome: () -> Unit) {
+private fun TimersHeader(isPhone: Boolean) {
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = onNavigateHome,
-                colors = ButtonDefaults.buttonColors(backgroundColor = Palette.primary, contentColor = Palette.onPrimary),
-                modifier = Modifier.height(44.dp)
-            ) {
-                Icon(imageVector = Icons.Default.ArrowBack, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Home")
-            }
-        }
-
         Spacer(Modifier.height(if (isPhone) 12.dp else 16.dp))
         Text(
             text = "Game Timers",
