@@ -1,8 +1,11 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,21 +68,28 @@ data class PendingJsonExport(
 
 class TimeWarpScreenModel : ScreenModel {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
+
     private val _uiState = MutableStateFlow(TimeWarpUiState())
 
     // Derived Flows
-    val score = _uiState.map { it.score }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val misses = _uiState.map { it.misses }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val ob = _uiState.map { it.ob }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val clickedZones = _uiState.map { it.clickedZones }.stateIn(screenModelScope, SharingStarted.Eagerly, emptySet())
-    val sweetSpotClicked = _uiState.map { it.sweetSpotClicked }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
-    val allRollersClicked = _uiState.map { it.allRollersClicked }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
-    val fieldFlipped = _uiState.map { it.fieldFlipped }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
-    val timeRemaining = _uiState.map { it.timeRemaining }.stateIn(screenModelScope, SharingStarted.Eagerly, 60.0f)
-    val isTimerRunning = _uiState.map { it.isTimerRunning }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
-    val activeParticipant = _uiState.map { it.activeParticipant }.stateIn(screenModelScope, SharingStarted.Eagerly, null)
-    val participantQueue = _uiState.map { it.queue }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyList())
-    val completedParticipants = _uiState.map { it.completed }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyList())
+    val score = _uiState.map { it.score }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val misses = _uiState.map { it.misses }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val ob = _uiState.map { it.ob }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val clickedZones = _uiState.map { it.clickedZones }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+    val sweetSpotClicked = _uiState.map { it.sweetSpotClicked }.stateIn(scope, SharingStarted.Eagerly, false)
+    val allRollersClicked = _uiState.map { it.allRollersClicked }.stateIn(scope, SharingStarted.Eagerly, false)
+    val fieldFlipped = _uiState.map { it.fieldFlipped }.stateIn(scope, SharingStarted.Eagerly, false)
+    val timeRemaining = _uiState.map { it.timeRemaining }.stateIn(scope, SharingStarted.Eagerly, 60.0f)
+    val isTimerRunning = _uiState.map { it.isTimerRunning }.stateIn(scope, SharingStarted.Eagerly, false)
+    val activeParticipant = _uiState.map { it.activeParticipant }.stateIn(scope, SharingStarted.Eagerly, null)
+    val participantQueue = _uiState.map { it.queue }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    val completedParticipants = _uiState.map { it.completed }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private var timerJob: Job? = null
     private var dataStore: DataStore? = null
@@ -87,7 +97,7 @@ class TimeWarpScreenModel : ScreenModel {
 
     fun initPersistence(store: DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        scope.launch {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {
@@ -103,7 +113,7 @@ class TimeWarpScreenModel : ScreenModel {
     private fun persistState() {
         val store = dataStore ?: return
         val state = _uiState.value
-        screenModelScope.launch {
+        scope.launch {
             try {
                 val json = Json.encodeToString(state)
                 store.save(persistenceKey, json)
@@ -294,7 +304,7 @@ class TimeWarpScreenModel : ScreenModel {
                 )
             }
 
-            timerJob = screenModelScope.launch {
+            timerJob = scope.launch {
                 var timeLeft = 60.0f
                 while (timeLeft > 0f && _uiState.value.isTimerRunning) {
                     delay(1000L)

@@ -1,8 +1,11 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,11 +70,18 @@ data class SpacedOutUiState(
 
 class SpacedOutScreenModel : ScreenModel {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
+
     // Timer State
     private val _timeLeft = MutableStateFlow(60)
-    public val timeLeft: StateFlow<Int> = _timeLeft.asStateFlow()
+    val timeLeft: StateFlow<Int> = _timeLeft.asStateFlow()
     private val _timerRunning = MutableStateFlow(false)
-    public val timerRunning: StateFlow<Boolean> = _timerRunning.asStateFlow()
+    val timerRunning: StateFlow<Boolean> = _timerRunning.asStateFlow()
     private var timerJob: Job? = null
 
     private var logCounter = 0
@@ -97,24 +107,24 @@ class SpacedOutScreenModel : ScreenModel {
     private val _uiState = MutableStateFlow(SpacedOutUiState())
 
     // Derived Flows for UI compatibility
-    public val score: StateFlow<Int> = _uiState.map { it.score }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    public val spacedOutCount: StateFlow<Int> = _uiState.map { it.spacedOutCount }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    public val zonesCaught: StateFlow<Int> = _uiState.map { it.zonesCaught }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    public val misses: StateFlow<Int> = _uiState.map { it.misses }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    public val ob: StateFlow<Int> = _uiState.map { it.ob }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    public val sweetSpotBonusOn: StateFlow<Boolean> = _uiState.map { it.sweetSpotBonus }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
-    public val fieldFlipped: StateFlow<Boolean> = _uiState.map { it.fieldFlipped }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
-    public val clickedZonesInRound: StateFlow<Set<SpacedOutZone>> = _uiState.map { it.clickedZones }.stateIn(screenModelScope, SharingStarted.Eagerly, emptySet())
-    public val activeParticipant: StateFlow<SpacedOutParticipant?> = _uiState.map { it.activeParticipant }.stateIn(screenModelScope, SharingStarted.Eagerly, null)
-    public val participantQueue: StateFlow<List<SpacedOutParticipant>> = _uiState.map { it.queue }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyList())
-    public val logEntries: StateFlow<List<String>> = _uiState.map { it.logEntries }.stateIn(screenModelScope, SharingStarted.Eagerly, emptyList())
+    val score: StateFlow<Int> = _uiState.map { it.score }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val spacedOutCount: StateFlow<Int> = _uiState.map { it.spacedOutCount }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val zonesCaught: StateFlow<Int> = _uiState.map { it.zonesCaught }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val misses: StateFlow<Int> = _uiState.map { it.misses }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val ob: StateFlow<Int> = _uiState.map { it.ob }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val sweetSpotBonusOn: StateFlow<Boolean> = _uiState.map { it.sweetSpotBonus }.stateIn(scope, SharingStarted.Eagerly, false)
+    val fieldFlipped: StateFlow<Boolean> = _uiState.map { it.fieldFlipped }.stateIn(scope, SharingStarted.Eagerly, false)
+    val clickedZonesInRound: StateFlow<Set<SpacedOutZone>> = _uiState.map { it.clickedZones }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+    val activeParticipant: StateFlow<SpacedOutParticipant?> = _uiState.map { it.activeParticipant }.stateIn(scope, SharingStarted.Eagerly, null)
+    val participantQueue: StateFlow<List<SpacedOutParticipant>> = _uiState.map { it.queue }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    val logEntries: StateFlow<List<String>> = _uiState.map { it.logEntries }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private var dataStore: DataStore? = null
     private val persistenceKey = "SpacedOutData.json"
 
     fun initPersistence(store: DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        scope.launch {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {
@@ -130,7 +140,7 @@ class SpacedOutScreenModel : ScreenModel {
     private fun persistState() {
         val store = dataStore ?: return
         val state = _uiState.value
-        screenModelScope.launch {
+        scope.launch {
             try {
                 val json = Json.encodeToString(state)
                 store.save(persistenceKey, json)
@@ -368,7 +378,7 @@ class SpacedOutScreenModel : ScreenModel {
         _timeLeft.value = durationSeconds
         _timerRunning.value = true
         timerJob?.cancel()
-        timerJob = screenModelScope.launch {
+        timerJob = scope.launch {
             while (_timeLeft.value > 0 && _timerRunning.value) {
                 delay(1000)
                 _timeLeft.update { (it - 1).coerceAtLeast(0) }
@@ -392,7 +402,8 @@ class SpacedOutScreenModel : ScreenModel {
         appendLog("Timer reset")
     }
 
-    override fun onDispose() {
+    // override fun onDispose() handled in base with scope.cancel()
+    private fun disposeTimer() {
         timerJob?.cancel()
         timerJob = null
     }

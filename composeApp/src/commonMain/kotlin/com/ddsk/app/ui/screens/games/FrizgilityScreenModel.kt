@@ -1,9 +1,12 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
 import kotlin.math.max
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +18,13 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 class FrizgilityScreenModel : ScreenModel {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
 
     private val undoStack = ArrayDeque<FrizgilityUiState>()
     private var timerJob: Job? = null
@@ -36,7 +46,7 @@ class FrizgilityScreenModel : ScreenModel {
 
     fun initPersistence(store: DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        scope.launch {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {
@@ -52,7 +62,7 @@ class FrizgilityScreenModel : ScreenModel {
     private fun persistState() {
         val store = dataStore ?: return
         val state = _uiState.value
-        screenModelScope.launch {
+        scope.launch {
             try {
                 val json = Json.encodeToString(state)
                 store.save(persistenceKey, json)
@@ -275,7 +285,7 @@ class FrizgilityScreenModel : ScreenModel {
         _timeLeft.value = durationSeconds
         _timerRunning.value = true
         timerJob?.cancel()
-        timerJob = screenModelScope.launch {
+        timerJob = scope.launch {
             while (_timeLeft.value > 0) {
                 delay(1000)
                 _timeLeft.value = max(0, _timeLeft.value - 1)

@@ -2,7 +2,10 @@ package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -101,6 +104,13 @@ class FarOutScreenModel(
     private val logger: FarOutLogger = ConsoleFarOutLogger()
 ) : ScreenModel {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
+
     private val _state = MutableStateFlow(FarOutState())
     val state: StateFlow<FarOutState> = _state.asStateFlow()
 
@@ -116,7 +126,7 @@ class FarOutScreenModel(
         dataStore = store
         // Desktop builds don't provide Dispatchers.Main by default.
         // Keep persistence IO/deserialization off Main.
-        screenModelScope.launch(Dispatchers.Default) {
+        scope.launch {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {
@@ -425,7 +435,7 @@ class FarOutScreenModel(
 
     fun startTimer() {
         if (timerJob != null) return
-        timerJob = screenModelScope.launch(Dispatchers.Default) {
+        timerJob = scope.launch(Dispatchers.Default) {
             _state.update { it.copy(timerDisplay = it.timerDisplay.copy(isRunning = true, isPaused = false)) }
             var millisLeft = DEFAULT_TIMER_MILLIS
             while (millisLeft > 0 && _state.value.timerDisplay.isRunning) {
@@ -462,7 +472,7 @@ class FarOutScreenModel(
     private fun persistParticipants() {
         val store = dataStore ?: return
         val data = PersistedFarOutData(_state.value.participants, _state.value.activeIndex)
-        screenModelScope.launch {
+        scope.launch {
             try {
                 val json = Json.encodeToString(data)
                 store.save(persistenceKey, json)
@@ -515,7 +525,7 @@ class FarOutScreenModel(
         val team = participant?.let { "${it.handler} & ${it.dog}" } ?: "No team"
         val entry = FarOutLogEntry(timestamp = Clock.System.now().toString(), team = team, event = message)
         _state.update { it.copy(logEntries = listOf(entry) + it.logEntries) }
-        screenModelScope.launch { /* storage.saveLog(_state.value.logEntries) */ }
+        scope.launch { /* storage.saveLog(_state.value.logEntries) */ }
         logger.log(event = message, team = team)
     }
 

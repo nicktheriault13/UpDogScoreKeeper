@@ -1,8 +1,10 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,6 +22,13 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
 class GreedyScreenModel : ScreenModel {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
 
     // NOTE: GreedyParticipant is defined in ExportParticipants.kt (commonMain).
 
@@ -95,7 +104,7 @@ class GreedyScreenModel : ScreenModel {
                 .thenByDescending { it.zone1Catches }
                 .thenBy { it.numberOfMisses }
         )
-    }.stateIn(screenModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _activeParticipantIndex = MutableStateFlow(0)
     val activeParticipantIndex = _activeParticipantIndex.asStateFlow()
@@ -107,7 +116,7 @@ class GreedyScreenModel : ScreenModel {
     fun initPersistence(store: DataStore) {
         dataStore = store
         // Desktop builds don't provide Dispatchers.Main by default.
-        screenModelScope.launch(Dispatchers.Default) {
+        scope.launch {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {
@@ -124,7 +133,7 @@ class GreedyScreenModel : ScreenModel {
     private fun persistState() {
         val store = dataStore ?: return
         val state = GreedyPersistedState(_participants.value, _completedParticipants.value)
-        screenModelScope.launch {
+        scope.launch {
             try {
                 val json = Json.encodeToString(state)
                 store.save(persistenceKey, json)

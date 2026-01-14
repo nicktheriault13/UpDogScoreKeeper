@@ -3,7 +3,10 @@ package com.ddsk.app.ui.screens.games
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,6 +16,13 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 class FourWayPlayScreenModel : ScreenModel {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
 
     @Serializable
     data class Participant(
@@ -62,7 +72,7 @@ class FourWayPlayScreenModel : ScreenModel {
         val store = dataStore ?: return
         val state = PersistedState(_participants.value, _completed.value)
         // Desktop builds don't provide Dispatchers.Main by default.
-        screenModelScope.launch(Dispatchers.Default) {
+        scope.launch {
             try {
                 val json = Json.encodeToString(state)
                 store.save(persistenceKey, json)

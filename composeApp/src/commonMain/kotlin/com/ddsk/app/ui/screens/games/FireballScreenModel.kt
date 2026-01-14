@@ -3,8 +3,11 @@ package com.ddsk.app.ui.screens.games
 // NOTE: this file was previously truncated and contained an unterminated comment causing compilation to fail.
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +24,13 @@ import kotlinx.serialization.json.Json
 
 @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 class FireballScreenModel : ScreenModel {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
 
     companion object {
         /** Fire Ball scoring grid values (8 zones). */
@@ -119,7 +129,7 @@ class FireballScreenModel : ScreenModel {
 
     fun initPersistence(store: DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        scope.launch {
             val raw = runCatching { store.load(persistenceKey) }.getOrNull()
             if (!raw.isNullOrBlank()) {
                 runCatching {
@@ -164,7 +174,7 @@ class FireballScreenModel : ScreenModel {
             sidebarCollapsed = _sidebarCollapsed.value,
             sidebarMessage = sidebarMessage.value
         )
-        screenModelScope.launch {
+        scope.launch {
             runCatching { store.save(persistenceKey, json.encodeToString(snapshot)) }
         }
     }
@@ -638,7 +648,7 @@ class FireballScreenModel : ScreenModel {
         _timerSecondsRemaining.value = durationSeconds
         _isTimerRunning.value = true
 
-        timerJob = screenModelScope.launch {
+        timerJob = scope.launch {
             var remaining = durationSeconds
             while (remaining >= 0 && _isTimerRunning.value) {
                 _timerSecondsRemaining.value = remaining

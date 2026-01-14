@@ -4,6 +4,10 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -96,6 +100,13 @@ data class BoomUiState(
 
 class BoomScreenModel : ScreenModel {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
+
     private val _uiState = MutableStateFlow(BoomUiState())
     val uiState = _uiState.asStateFlow()
 
@@ -124,7 +135,7 @@ class BoomScreenModel : ScreenModel {
     private fun persistState() {
         val store = dataStore ?: return
         val state = _uiState.value
-        screenModelScope.launch {
+        scope.launch {
             try {
                 val json = Json.encodeToString(state)
                 store.save(persistenceKey, json)
@@ -167,7 +178,7 @@ class BoomScreenModel : ScreenModel {
             val sweetBonus = if (state.sweetSpotActive) 10 else 0
             val updatedCounts = state.scoreBreakdown.buttonCounts.toMutableMap()
             state.buttonState.clickedButtons.forEach { id ->
-                updatedCounts[id] = updatedCounts.getOrDefault(id, 0) + 1
+                updatedCounts[id] = (updatedCounts[id] ?: 0) + 1
             }
             state.copy(
                 scoreBreakdown = state.scoreBreakdown.copy(
@@ -191,7 +202,7 @@ class BoomScreenModel : ScreenModel {
             val updatedCounts = state.scoreBreakdown.buttonCounts.toMutableMap()
             if (fiveClicked) {
                 state.buttonState.clickedButtons.forEach { id ->
-                    updatedCounts[id] = updatedCounts.getOrDefault(id, 0) + 1
+                    updatedCounts[id] = (updatedCounts[id] ?: 0) + 1
                 }
             }
             state.copy(
@@ -308,7 +319,7 @@ class BoomScreenModel : ScreenModel {
         timerJob?.cancel()
         _timeLeft.value = duration
         _timerRunning.value = true
-        timerJob = screenModelScope.launch {
+        timerJob = scope.launch {
             while (_timeLeft.value > 0 && _timerRunning.value) {
                 delay(1000)
                 _timeLeft.update { (it - 1).coerceAtLeast(0) }

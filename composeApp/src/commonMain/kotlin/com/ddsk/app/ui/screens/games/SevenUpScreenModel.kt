@@ -1,8 +1,11 @@
 package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import com.ddsk.app.persistence.DataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -93,6 +96,12 @@ data class SevenUpUiState(
 }
 
 class SevenUpScreenModel : ScreenModel {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDispose() {
+        scope.cancel()
+        super.onDispose()
+    }
 
     enum class ImportMode { Add, ReplaceAll }
 
@@ -100,9 +109,9 @@ class SevenUpScreenModel : ScreenModel {
     val uiState = _uiState.asStateFlow()
 
     // Exposed Flows for UI (aliased)
-    val score = _uiState.map { it.score }.stateIn(screenModelScope, SharingStarted.Eagerly, 0)
-    val timerRunning = _uiState.map { it.isTimerRunning }.stateIn(screenModelScope, SharingStarted.Eagerly, false)
-    val timeLeft = _uiState.map { it.timeRemaining }.stateIn(screenModelScope, SharingStarted.Eagerly, 60.0f)
+    val score = _uiState.map { it.score }.stateIn(scope, SharingStarted.Eagerly, 0)
+    val timerRunning = _uiState.map { it.isTimerRunning }.stateIn(scope, SharingStarted.Eagerly, false)
+    val timeLeft = _uiState.map { it.timeRemaining }.stateIn(scope, SharingStarted.Eagerly, 60.0f)
 
     // Audio Timer
     val audioTimerPlaying = MutableStateFlow(false)
@@ -128,7 +137,7 @@ class SevenUpScreenModel : ScreenModel {
 
     fun initPersistence(store: DataStore) {
         dataStore = store
-        screenModelScope.launch {
+        scope.launch {
             val json = store.load(persistenceKey)
             if (json != null) {
                 try {
@@ -144,7 +153,7 @@ class SevenUpScreenModel : ScreenModel {
     private fun persistState() {
         val store = dataStore ?: return
         val state = _uiState.value
-        screenModelScope.launch {
+        scope.launch {
             try {
                 val json = Json.encodeToString(state)
                 store.save(persistenceKey, json)
@@ -261,7 +270,7 @@ class SevenUpScreenModel : ScreenModel {
             _uiState.update { it.copy(isTimerRunning = true) }
             val startTimeMark = TimeSource.Monotonic.markNow()
             val initialTimeOnStart = _uiState.value.timeRemaining
-            timerJob = screenModelScope.launch {
+            timerJob = scope.launch {
                 while (_uiState.value.isTimerRunning) {
                     val elapsedSeconds = startTimeMark.elapsedNow().inWholeMilliseconds / 1000f
                     _uiState.update {
@@ -426,4 +435,3 @@ class SevenUpScreenModel : ScreenModel {
 
 @Serializable
 data class SevenUpPendingJsonExport(val filename: String, val content: String)
-
