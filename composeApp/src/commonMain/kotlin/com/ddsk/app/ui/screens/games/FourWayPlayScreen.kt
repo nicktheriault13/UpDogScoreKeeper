@@ -51,6 +51,9 @@ import com.ddsk.app.persistence.rememberDataStore
 import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 // Palette from original file
 private object FourWayPalette {
@@ -222,9 +225,18 @@ object FourWayPlayScreen : Screen {
                                     if (bytes.isEmpty()) {
                                         exportMessage = "Export failed"
                                     } else {
-                                        // Use a multiplatform-safe timestamp (doesn't rely on java.lang.System)
-                                        val timestamp = kotlin.time.TimeSource.Monotonic.markNow().elapsedNow().inWholeMilliseconds
-                                        val fileName = "FourWayPlay_${timestamp}.xlsm"
+                                        val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                        fun pad2(n: Int) = n.toString().padStart(2, '0')
+                                        val stamp = buildString {
+                                            append(now.year)
+                                            append(pad2(now.monthNumber))
+                                            append(pad2(now.dayOfMonth))
+                                            append('_')
+                                            append(pad2(now.hour))
+                                            append(pad2(now.minute))
+                                            append(pad2(now.second))
+                                        }
+                                        val fileName = "4WayPlay_Scores_${stamp}.xlsm"
                                         fileExporter.save(fileName, bytes)
                                         exportMessage = "Exported ${exportRows.size} teams"
                                     }
@@ -274,6 +286,13 @@ object FourWayPlayScreen : Screen {
                     }
                 }
             )
+        }
+
+        val pendingJsonExport by screenModel.pendingJsonExport.collectAsState()
+        LaunchedEffect(pendingJsonExport) {
+            val pending = pendingJsonExport ?: return@LaunchedEffect
+            saveJsonFileWithPicker(pending.filename, pending.content)
+            screenModel.consumePendingJsonExport()
         }
     }
 }
