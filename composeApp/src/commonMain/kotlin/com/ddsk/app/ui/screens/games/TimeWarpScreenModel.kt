@@ -38,6 +38,7 @@ data class TimeWarpUiState(
     // Usually timer is ephemeral, but if we want to persist mid-game state...
     val timeRemaining: Float = 60.0f,
     val isTimerRunning: Boolean = false,
+    val isAudioTimerPlaying: Boolean = false,
     val activeParticipant: TimeWarpParticipant? = null,
     val queue: List<TimeWarpParticipant> = emptyList(),
     val completed: List<TimeWarpParticipant> = emptyList()
@@ -87,6 +88,7 @@ class TimeWarpScreenModel : ScreenModel {
     val fieldFlipped = _uiState.map { it.fieldFlipped }.stateIn(scope, SharingStarted.Eagerly, false)
     val timeRemaining = _uiState.map { it.timeRemaining }.stateIn(scope, SharingStarted.Eagerly, 60.0f)
     val isTimerRunning = _uiState.map { it.isTimerRunning }.stateIn(scope, SharingStarted.Eagerly, false)
+    val isAudioTimerPlaying = _uiState.map { it.isAudioTimerPlaying }.stateIn(scope, SharingStarted.Eagerly, false)
     val activeParticipant = _uiState.map { it.activeParticipant }.stateIn(scope, SharingStarted.Eagerly, null)
     val participantQueue = _uiState.map { it.queue }.stateIn(scope, SharingStarted.Eagerly, emptyList())
     val completedParticipants = _uiState.map { it.completed }.stateIn(scope, SharingStarted.Eagerly, emptyList())
@@ -290,75 +292,94 @@ class TimeWarpScreenModel : ScreenModel {
                 sweetSpotClicked = false,
                 allRollersClicked = false,
                 timeRemaining = 60.0f,
-                isTimerRunning = false
+                isTimerRunning = false,
+                isAudioTimerPlaying = false
             )
         }
     }
 
-    fun startTimer() {
-        if (!_uiState.value.isTimerRunning) {
-            _uiState.update { currentState ->
-                currentState.copy(
-                    isTimerRunning = true,
-                    timeRemaining = 60.0f // Reset to 60 seconds on start
-                )
+    fun toggleAudioTimer() {
+        _uiState.update { s -> s.copy(isAudioTimerPlaying = !s.isAudioTimerPlaying) }
+        persistState()
+    }
+
+    fun startCountdown() {
+        if (_uiState.value.isTimerRunning) return
+
+        // Reset and start countdown
+        _uiState.update { currentState ->
+            currentState.copy(
+                isTimerRunning = true,
+                timeRemaining = 60.0f
+            )
+        }
+
+        timerJob?.cancel()
+        timerJob = scope.launch {
+            var timeLeft = 60.0f
+            while (timeLeft > 0f && _uiState.value.isTimerRunning) {
+                delay(10L)
+                timeLeft = max(0f, timeLeft - (10L / 1000f))
+                _uiState.update { it.copy(timeRemaining = timeLeft) }
             }
 
-            timerJob = scope.launch {
-                var timeLeft = 60.0f
-                while (timeLeft > 0f && _uiState.value.isTimerRunning) {
-                    delay(1000L)
-                    timeLeft -= 1.0f
-                    _uiState.update { currentState ->
-                        currentState.copy(
-                            timeRemaining = timeLeft
-                        )
-                    }
-                }
-                if (timeLeft <= 0f) {
-                    stopTimer()
-                }
+            // Auto-stop when finished (do NOT add score here; only add on explicit stop/manual entry).
+            if (timeLeft <= 0f) {
+                _uiState.update { it.copy(isTimerRunning = false, timeRemaining = 0f) }
+                persistState()
             }
         }
     }
 
-    fun stopTimer() {
+    /**
+     * Stops the countdown and adds the remaining time (rounded to nearest whole second) to the score.
+     */
+    fun stopCountdownAndAddScore() {
         timerJob?.cancel()
-        _uiState.update { currentState ->
-            currentState.copy(
-                isTimerRunning = false
+        val remaining = _uiState.value.timeRemaining
+        val add = remaining.roundToInt().coerceAtLeast(0)
+        _uiState.update { s ->
+            s.copy(
+                isTimerRunning = false,
+                score = s.score + add,
+                timeRemaining = remaining
             )
         }
         persistState()
     }
 
-    fun setTimeManually(timeStr: String) {
+    /**
+     * For manual entry via long-press: sets timeRemaining and adds that value (rounded) to score.
+     */
+    fun applyManualTimeAndAddScore(timeStr: String) {
         val newTime = timeStr.toFloatOrNull() ?: return
         timerJob?.cancel()
-        _uiState.update { currentState ->
-            currentState.copy(
+        val add = newTime.roundToInt().coerceAtLeast(0)
+        _uiState.update { s ->
+            s.copy(
                 timeRemaining = newTime,
-                isTimerRunning = false
+                isTimerRunning = false,
+                score = s.score + add
             )
         }
         persistState()
     }
 
+    // Back-compat with existing UI callers (now routed to new semantics)
+    fun startTimer() = startCountdown()
+    fun stopTimer() = stopCountdownAndAddScore()
+    fun setTimeManually(timeStr: String) = applyManualTimeAndAddScore(timeStr)
+
+    // --- Public API expected by the screen ---
     fun incrementMisses() {
-        _uiState.update { currentState ->
-            currentState.copy(
-                misses = currentState.misses + 1
-            )
-        }
+        logEvent("Miss+")
+        _uiState.update { currentState -> currentState.copy(misses = currentState.misses + 1) }
         persistState()
     }
 
     fun incrementOb() {
-        _uiState.update { currentState ->
-            currentState.copy(
-                ob = currentState.ob + 1
-            )
-        }
+        logEvent("OB+")
+        _uiState.update { currentState -> currentState.copy(ob = currentState.ob + 1) }
         persistState()
     }
 
@@ -379,15 +400,8 @@ class TimeWarpScreenModel : ScreenModel {
         logEvent("Sweet Spot")
         if (_uiState.value.clickedZones.size >= 3) {
             _uiState.update { currentState ->
-                val newScore = if (!currentState.sweetSpotClicked) {
-                    currentState.score + 25
-                } else {
-                    currentState.score - 25
-                }
-                currentState.copy(
-                    score = newScore,
-                    sweetSpotClicked = !currentState.sweetSpotClicked
-                )
+                val newScore = if (!currentState.sweetSpotClicked) currentState.score + 25 else currentState.score - 25
+                currentState.copy(score = newScore, sweetSpotClicked = !currentState.sweetSpotClicked)
             }
             persistState()
         }
@@ -395,27 +409,23 @@ class TimeWarpScreenModel : ScreenModel {
 
     fun toggleAllRollers() {
         logEvent("All Rollers")
-        _uiState.update { currentState ->
-            currentState.copy(
-                allRollersClicked = !currentState.allRollersClicked
-            )
-        }
+        _uiState.update { currentState -> currentState.copy(allRollersClicked = !currentState.allRollersClicked) }
         persistState()
     }
 
     fun flipField() {
         logEvent("Flip Field")
-        _uiState.update { currentState ->
-            currentState.copy(
-                fieldFlipped = !currentState.fieldFlipped
-            )
-        }
+        _uiState.update { currentState -> currentState.copy(fieldFlipped = !currentState.fieldFlipped) }
         persistState()
     }
 
     fun reset() {
         logEvent("Reset")
-        _uiState.value = TimeWarpUiState(activeParticipant = _uiState.value.activeParticipant, queue = _uiState.value.queue, completed = _uiState.value.completed)
+        _uiState.value = TimeWarpUiState(
+            activeParticipant = _uiState.value.activeParticipant,
+            queue = _uiState.value.queue,
+            completed = _uiState.value.completed
+        )
         timerJob?.cancel()
         persistState()
     }

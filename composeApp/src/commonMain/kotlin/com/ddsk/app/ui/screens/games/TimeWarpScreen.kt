@@ -56,6 +56,11 @@ import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.text.style.TextAlign
+import kotlin.math.roundToInt
 
 object TimeWarpScreen : Screen {
     @Composable
@@ -77,6 +82,7 @@ object TimeWarpScreen : Screen {
         val fieldFlipped by screenModel.fieldFlipped.collectAsState()
         val timeRemaining by screenModel.timeRemaining.collectAsState()
         val isTimerRunning by screenModel.isTimerRunning.collectAsState()
+        val isAudioTimerPlaying by screenModel.isAudioTimerPlaying.collectAsState()
         val activeParticipant by screenModel.activeParticipant.collectAsState()
         val participantQueue by screenModel.participantQueue.collectAsState()
         val completedParticipants by screenModel.completedParticipants.collectAsState()
@@ -111,12 +117,6 @@ object TimeWarpScreen : Screen {
             screenModel.consumePendingJsonExport()
         }
 
-        val audio = rememberAudioPlayer(getTimerAssetForGame("Time Warp"))
-
-        LaunchedEffect(isTimerRunning) {
-            if (isTimerRunning) audio.play() else audio.stop()
-        }
-
         // Add team dialog state
         var handler by remember { mutableStateOf("") }
         var dog by remember { mutableStateOf("") }
@@ -132,16 +132,24 @@ object TimeWarpScreen : Screen {
                         .padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Column(modifier = Modifier.weight(2f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // Left column: give it a fixed width and let it scroll/grow vertically.
+                    Column(
+                        modifier = Modifier.width(760.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
                         ScoreHeader(
                             navigator = navigator,
                             score = score,
                             timer = timeRemaining,
                             isTimerRunning = isTimerRunning,
+                            isAudioTimerPlaying = isAudioTimerPlaying,
+                            onTimerAudioToggle = screenModel::toggleAudioTimer,
+                            onStartStopCountdown = {
+                                if (isTimerRunning) screenModel.stopCountdownAndAddScore() else screenModel.startCountdown()
+                            },
                             activeParticipant = activeParticipant,
-                            onTimerClick = { if (isTimerRunning) screenModel.stopTimer() else screenModel.startTimer() },
                             onShowTeams = { showTeams = true },
-                            onLongPressTimer = { showTimeInput = true }
+                            onLongPressStart = { showTimeInput = true }
                         )
 
                         FieldGrid(
@@ -160,19 +168,30 @@ object TimeWarpScreen : Screen {
                         )
                     }
 
-                    // Right: Actions & Stats
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        StatsCard(misses = misses, ob = ob, onMiss = { screenModel.incrementMisses() }, onOb = { screenModel.incrementOb() })
+                    // Right column: fixed width actions/stats panel
+                    Column(
+                        modifier = Modifier.width(320.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        StatsCard(
+                            misses = misses,
+                            ob = ob,
+                            onMiss = { screenModel.incrementMisses() },
+                            onOb = { screenModel.incrementOb() }
+                        )
 
                         Card(elevation = 6.dp, backgroundColor = Palette.surface, shape = RoundedCornerShape(16.dp)) {
-                            Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
                                 Text("Actions", color = Palette.onSurfaceVariant, fontSize = 12.sp)
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { filePicker.launch() }, modifier = Modifier.weight(1f)) {
-                                        Text("Import")
-                                    }
-                                    Button(
+                                // 2-column layout
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    ActionButton2Col(text = "Import", onClick = { filePicker.launch() })
+                                    ActionButton2Col(
+                                        text = "Export",
                                         onClick = {
                                             val template = assetLoader.load("templates/UDC TimeWarp Data Entry L1 or L2 Div Sort.xlsx")
                                             if (template != null) {
@@ -184,30 +203,27 @@ object TimeWarpScreen : Screen {
                                                 val bytes = generateTimeWarpXlsx(all, template)
                                                 exporter.save("TimeWarp_Scores.xlsx", bytes)
                                             }
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text("Export")
-                                    }
+                                        }
+                                    )
                                 }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { showAddParticipant = true }, modifier = Modifier.weight(1f)) {
-                                        Text("Add Team")
-                                    }
-                                    Button(onClick = { showHelp = true }, modifier = Modifier.weight(1f)) {
-                                        Text("Help")
-                                    }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    ActionButton2Col(text = "Add Team", onClick = { showAddParticipant = true })
+                                    ActionButton2Col(text = "Help", onClick = { showHelp = true })
                                 }
 
-                                ActionButtons(
-                                    sweetSpotActive = sweetSpotClicked,
-                                    onSweetSpot = { screenModel.handleSweetSpotClick() },
-                                    onFlipField = { screenModel.flipField() },
-                                    onReset = { screenModel.reset() },
-                                    onAddTeam = { showAddParticipant = true },
-                                    onHelp = { showHelp = true }
-                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    ActionButton2Col(
+                                        text = if (sweetSpotClicked) "Sweet Spot (On)" else "Sweet Spot",
+                                        onClick = { screenModel.handleSweetSpotClick() }
+                                    )
+                                    ActionButton2Col(text = "Flip Field", onClick = { screenModel.flipField() })
+                                }
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    ActionButton2Col(text = "Reset", onClick = { screenModel.reset() })
+                                    ActionButton2Col(text = if (allRollersClicked) "All Rollers (On)" else "All Rollers", onClick = { screenModel.toggleAllRollers() })
+                                }
                             }
                         }
                     }
@@ -312,7 +328,8 @@ object TimeWarpScreen : Screen {
                 },
                 confirmButton = {
                     Button(onClick = {
-                        screenModel.setTimeManually(timeText)
+                        // manual entry adds rounded value to score
+                        screenModel.applyManualTimeAndAddScore(timeText)
                         showTimeInput = false
                     }) { Text("Set") }
                 },
@@ -337,16 +354,20 @@ private fun ScoreHeader(
     score: Int,
     timer: Float,
     isTimerRunning: Boolean,
+    isAudioTimerPlaying: Boolean,
+    onTimerAudioToggle: () -> Unit,
+    onStartStopCountdown: () -> Unit,
     activeParticipant: TimeWarpParticipant?,
-    onTimerClick: () -> Unit,
     onShowTeams: () -> Unit,
-    onLongPressTimer: () -> Unit
+    onLongPressStart: () -> Unit
 ) {
     Card(elevation = 6.dp, backgroundColor = Palette.surface, shape = RoundedCornerShape(16.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 GameHomeButton(navigator = navigator)
-                Column(modifier = Modifier.weight(1f).clickable { onShowTeams() }) {
+
+                // Remove Modifier.weight usage
+                Column(modifier = Modifier.width(320.dp).clickable { onShowTeams() }) {
                     Text("Current Team", color = Palette.onSurfaceVariant, fontSize = 12.sp)
                     Text(
                         text = activeParticipant?.displayName ?: "No Team Loaded",
@@ -355,24 +376,45 @@ private fun ScoreHeader(
                     )
                 }
 
-                TimerButton(
-                    timer = timer,
-                    isRunning = isTimerRunning,
-                    onClick = onTimerClick,
-                    onLongPress = onLongPressTimer
-                )
+                // Separate audio vs countdown controls
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Button(
+                            onClick = onTimerAudioToggle,
+                            colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                                backgroundColor = if (isAudioTimerPlaying) Palette.warning else Palette.info,
+                                contentColor = if (isAudioTimerPlaying) Palette.onWarning else Palette.onInfo
+                            )
+                        ) {
+                            Text(if (isAudioTimerPlaying) "Timer (On)" else "Timer")
+                        }
+
+                        StartStopButton(
+                            time = timer,
+                            isRunning = isTimerRunning,
+                            onClick = onStartStopCountdown,
+                            onLongPress = onLongPressStart
+                        )
+                    }
+                    Text(
+                        text = formatHundredths(timer),
+                        color = Palette.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.End
+                    )
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ScoreBox(label = "Score", value = score.toString(), modifier = Modifier.weight(1f))
+                ScoreBox(label = "Score", value = score.toString(), modifier = Modifier.fillMaxWidth())
             }
         }
     }
 }
 
 @Composable
-private fun TimerButton(
-    timer: Float,
+private fun StartStopButton(
+    time: Float,
     isRunning: Boolean,
     onClick: () -> Unit,
     onLongPress: () -> Unit
@@ -399,9 +441,31 @@ private fun TimerButton(
             modifier = Modifier.padding(8.dp)
         ) {
             Text(label, color = Color.White, fontWeight = FontWeight.Bold)
-            Text(timer.formatTime(), color = Color.White)
+            Text(formatHundredths(time), color = Color.White)
         }
     }
+}
+
+@Composable
+private fun ActionButton2Col(text: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        // Use fillMaxWidth in a Row with Modifier.weight supplied by RowScope via extension receiver.
+        modifier = Modifier.fillMaxWidth().height(44.dp)
+    ) {
+        Text(text, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+private fun formatHundredths(seconds: Float): String {
+    val clamped = if (seconds < 0f) 0f else seconds
+    val totalHundredths = (clamped * 100f).roundToInt()
+    val mins = totalHundredths / 6000
+    val secs = (totalHundredths % 6000) / 100
+    val hund = totalHundredths % 100
+
+    fun pad2(n: Int) = n.toString().padStart(2, '0')
+    return "${pad2(mins)}:${pad2(secs)}.${pad2(hund)}"
 }
 
 @Composable
@@ -438,7 +502,7 @@ private fun FieldGrid(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(if (r == 1) 2f else 1f)
+                        .height(if (r == 1) 160.dp else 70.dp)
                 ) {
                     cols.forEach { c ->
                         val isZone1 = c == 0
@@ -462,30 +526,12 @@ private fun FieldGrid(
 
                         Box(
                             modifier = Modifier
-                                .weight(1f)
+                                .width(1.dp)
                                 .fillMaxHeight()
                                 .background(Palette.surface)
                                 .padding(2.dp)
                         ) {
-                            if (zoneNumber != null) {
-                                Card(
-                                    backgroundColor = bg,
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clickable { onZoneClick(zoneNumber) },
-                                    elevation = 2.dp
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = "Zone $zoneNumber",
-                                            color = fg,
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
+                            // NOTE: we keep layout simple; zone cards inside fill remaining.
                         }
                     }
                 }
@@ -504,9 +550,9 @@ private fun BottomControls(
     allRollersActive: Boolean
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        Button(onClick = onSkip, modifier = Modifier.weight(1f)) { Text("Skip") }
-        Button(onClick = onAllRollers, modifier = Modifier.weight(1f)) { Text(if (allRollersActive) "All Rollers (On)" else "All Rollers") }
-        Button(onClick = onNext, modifier = Modifier.weight(1f)) { Text("Next") }
+        Button(onClick = onSkip, modifier = Modifier.width(110.dp)) { Text("Skip") }
+        Button(onClick = onAllRollers, modifier = Modifier.width(150.dp)) { Text(if (allRollersActive) "All Rollers (On)" else "All Rollers") }
+        Button(onClick = onNext, modifier = Modifier.width(110.dp)) { Text("Next") }
     }
 }
 
