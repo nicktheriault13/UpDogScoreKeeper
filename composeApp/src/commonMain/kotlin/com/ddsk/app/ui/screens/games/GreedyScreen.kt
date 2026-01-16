@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -135,43 +137,65 @@ object GreedyScreen : Screen {
                                 .fillMaxHeight(),
                             verticalArrangement = Arrangement.spacedBy(columnSpacing)
                         ) {
-                            GreedyScoreSummaryCard(
-                                navigator = navigator,
-                                handlerDog = participants.firstOrNull()?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
-                                throwZone = throwZone,
-                                score = score,
-                                misses = misses,
-                                sweetSpotBonus = sweetSpotBonus,
-                                allRollers = allRollersEnabled
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    GreedyScoreSummaryCard(
+                                        navigator = navigator,
+                                        handlerDog = participants.firstOrNull()?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
+                                        throwZone = throwZone,
+                                        score = score,
+                                        misses = misses,
+                                        sweetSpotBonus = sweetSpotBonus,
+                                        allRollers = allRollersEnabled,
+                                        onUndo = screenModel::undo,
+                                        onSweetSpotBonus = { showSweetSpotBonusDialog = true },
+                                        sweetSpotBonusEntered = sweetSpotBonus > 0,
+                                        onMissPlus = screenModel::incrementMisses,
+                                        onAllRollersToggle = screenModel::toggleAllRollers,
+                                        allRollersEnabled = allRollersEnabled
+                                    )
+                                }
 
-                            Box(modifier = Modifier.weight(1f)) {
-                                GreedyBoard(
-                                    rotationDegrees = rotationDegrees,
-                                    activeButtons = activeButtons,
+                                GreedyZoneControlCard(
                                     throwZone = throwZone,
-                                    onPress = screenModel::handleButtonPress,
-                                    modifier = Modifier.fillMaxSize()
+                                    anySquareClicked = activeButtons.isNotEmpty(),
+                                    onNextThrowZoneClockwise = { screenModel.nextThrowZone(clockwise = true) },
+                                    onNextThrowZoneCounterClockwise = { screenModel.nextThrowZone(clockwise = false) },
+                                    clockwiseDisabled = screenModel.isClockwiseDisabled.collectAsState().value,
+                                    counterClockwiseDisabled = screenModel.isCounterClockwiseDisabled.collectAsState().value,
+                                    rotateStartingVisible = screenModel.isRotateStartingZoneVisible.collectAsState().value,
+                                    onRotateStartingZone = screenModel::rotateStartingZone,
+                                    modifier = Modifier.width(190.dp)
                                 )
                             }
 
+                            BoxWithConstraints(
+                                modifier = Modifier
+                                    // Give the board a chance to grow, but also guarantee a minimum so it doesn't collapse.
+                                    .weight(1f, fill = true)
+                                    .heightIn(min = 260.dp)
+                                    .fillMaxWidth()
+                            ) {
+                                // Fit the board to the available height so it doesn't get clipped.
+                                val boardSide = minOf(maxWidth, maxHeight)
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    GreedyBoard(
+                                        rotationDegrees = rotationDegrees,
+                                        activeButtons = activeButtons,
+                                        throwZone = throwZone,
+                                        onPress = screenModel::handleButtonPress,
+                                        modifier = Modifier.size(boardSide)
+                                    )
+                                }
+                            }
+
                             GreedyControlRow(
-                                throwZone = throwZone,
-                                anySquareClicked = activeButtons.isNotEmpty(),
                                 timerRunning = timerRunning.value,
                                 onToggleTimer = { timerRunning.value = !timerRunning.value },
-                                onUndo = screenModel::undo,
-                                onNextThrowZoneClockwise = { screenModel.nextThrowZone(clockwise = true) },
-                                onNextThrowZoneCounterClockwise = { screenModel.nextThrowZone(clockwise = false) },
-                                clockwiseDisabled = screenModel.isClockwiseDisabled.collectAsState().value,
-                                counterClockwiseDisabled = screenModel.isCounterClockwiseDisabled.collectAsState().value,
-                                rotateStartingVisible = screenModel.isRotateStartingZoneVisible.collectAsState().value,
-                                onRotateStartingZone = screenModel::rotateStartingZone,
-                                onSweetSpotBonus = { showSweetSpotBonusDialog = true },
-                                sweetSpotBonusEntered = sweetSpotBonus > 0,
-                                onMissPlus = screenModel::incrementMisses,
-                                onAllRollersToggle = screenModel::toggleAllRollers,
-                                allRollersEnabled = allRollersEnabled,
                                 onReset = screenModel::reset
                             )
                         }
@@ -183,7 +207,6 @@ object GreedyScreen : Screen {
                                 .fillMaxHeight(),
                             verticalArrangement = Arrangement.spacedBy(columnSpacing)
                         ) {
-
                             GreedyImportExportCard(
                                 onImportClick = { filePicker.launch() },
                                 onExportClick = {
@@ -319,10 +342,20 @@ private fun GreedyScoreSummaryCard(
     score: Int,
     misses: Int,
     sweetSpotBonus: Int,
-    allRollers: Boolean
+    allRollers: Boolean,
+    onUndo: () -> Unit,
+    onSweetSpotBonus: () -> Unit,
+    sweetSpotBonusEntered: Boolean,
+    onMissPlus: () -> Unit,
+    onAllRollersToggle: () -> Unit,
+    allRollersEnabled: Boolean
 ) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        elevation = 6.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -354,149 +387,16 @@ private fun GreedyScoreSummaryCard(
                 style = MaterialTheme.typography.subtitle1,
                 fontWeight = FontWeight.Bold
             )
-        }
-    }
-}
 
-@Composable
-private fun GreedyBoard(
-    rotationDegrees: Int,
-    activeButtons: Set<String>,
-    throwZone: Int,
-    onPress: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(shape = RoundedCornerShape(18.dp), elevation = 8.dp, modifier = modifier) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            val gridSize = minOf(maxWidth, maxHeight)
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // Visual rotation like the React implementation:
-            // - rotate the square
-            // - counter-rotate the text so labels remain upright
-            Box(
-                modifier = Modifier
-                    .size(gridSize)
-                    .graphicsLayer {
-                        rotationZ = rotationDegrees.toFloat()
-                        transformOrigin = TransformOrigin(0.5f, 0.5f)
-                    }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                // Square (3x3)
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.matchParentSize()
-                ) {
-                    for (r in 0..2) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            for (c in 0..2) {
-                                val label = when {
-                                    r == 0 && c == 0 -> "X"
-                                    r == 0 && c == 1 -> "Y"
-                                    r == 0 && c == 2 -> "Z"
-                                    r == 1 && c == 1 -> "Sweet Spot"
-                                    else -> ""
-                                }
-                                val clicked = label.isNotBlank() && label in activeButtons
-                                val enabled = label.isNotBlank() && !(throwZone == 4 && "Sweet Spot" in activeButtons && label != "Sweet Spot")
-
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (label.isNotBlank()) {
-                                        Button(
-                                            onClick = { onPress(label) },
-                                            enabled = enabled,
-                                            colors = ButtonDefaults.buttonColors(
-                                                backgroundColor = if (clicked) successGreen else greedyPink,
-                                                contentColor = Color.White
-                                            ),
-                                            modifier = Modifier.fillMaxSize()
-                                        ) {
-                                            Text(
-                                                label,
-                                                fontWeight = FontWeight.Bold,
-                                                textAlign = TextAlign.Center,
-                                                modifier = Modifier.graphicsLayer {
-                                                    rotationZ = -rotationDegrees.toFloat()
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun GreedyControlRow(
-    throwZone: Int,
-    anySquareClicked: Boolean,
-    timerRunning: Boolean,
-    onToggleTimer: () -> Unit,
-    onUndo: () -> Unit,
-    onNextThrowZoneClockwise: () -> Unit,
-    onNextThrowZoneCounterClockwise: () -> Unit,
-    clockwiseDisabled: Boolean,
-    counterClockwiseDisabled: Boolean,
-    rotateStartingVisible: Boolean,
-    onRotateStartingZone: () -> Unit,
-    onSweetSpotBonus: () -> Unit,
-    sweetSpotBonusEntered: Boolean,
-    onMissPlus: () -> Unit,
-    onAllRollersToggle: () -> Unit,
-    allRollersEnabled: Boolean,
-    onReset: () -> Unit,
-) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = onToggleTimer,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) warningOrange else infoBlue)
-                ) {
-                    Text(if (timerRunning) "Stop Timer" else "Timer", color = Color.White)
-                }
                 Button(onClick = onUndo) { Text("Undo") }
-                Button(onClick = onReset, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFB3261E))) {
-                    Text("Reset", color = Color.White)
-                }
-                Spacer(modifier = Modifier.weight(1f))
-            }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = onNextThrowZoneCounterClockwise,
-                    enabled = throwZone < 4 && anySquareClicked && !counterClockwiseDisabled,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF625B71))
-                ) { Text("<-- Next ThrowZone", color = Color.White, fontSize = 12.sp) }
-
-                Button(
-                    onClick = onNextThrowZoneClockwise,
-                    enabled = throwZone < 4 && anySquareClicked && !clockwiseDisabled,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF625B71))
-                ) { Text("Next ThrowZone -->", color = Color.White, fontSize = 12.sp) }
-
-                Button(
-                    onClick = onRotateStartingZone,
-                    enabled = rotateStartingVisible && throwZone == 1,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF625B71))
-                ) { Text("Rotate Starting Zone", color = Color.White, fontSize = 12.sp) }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
                     onClick = onSweetSpotBonus,
                     enabled = !sweetSpotBonusEntered,
@@ -516,6 +416,159 @@ private fun GreedyControlRow(
         }
     }
 }
+
+@Composable
+private fun GreedyBoard(
+    rotationDegrees: Int,
+    activeButtons: Set<String>,
+    throwZone: Int,
+    onPress: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(shape = RoundedCornerShape(18.dp), elevation = 8.dp, modifier = modifier) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            // Use responsive padding/spacing so we never clip the 3x3 grid.
+            val minSide = minOf(maxWidth, maxHeight)
+            val outerPadding = (minSide * 0.06f).coerceIn(8.dp, 16.dp)
+            val cellGap = (minSide * 0.04f).coerceIn(6.dp, 12.dp)
+            val gridSize = (minSide - outerPadding * 2)
+
+             // Visual rotation like the React implementation:
+             // - rotate the square
+             // - counter-rotate the text so labels remain upright
+             Box(
+                 modifier = Modifier
+                    .padding(outerPadding)
+                    .size(gridSize)
+                     .graphicsLayer {
+                         rotationZ = rotationDegrees.toFloat()
+                         transformOrigin = TransformOrigin(0.5f, 0.5f)
+                     }
+             ) {
+                 // Square (3x3)
+                 Column(
+                    verticalArrangement = Arrangement.spacedBy(cellGap),
+                     modifier = Modifier.matchParentSize()
+                 ) {
+                     for (r in 0..2) {
+                         Row(
+                             modifier = Modifier
+                                 .fillMaxWidth()
+                                 .weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(cellGap)
+                         ) {
+                             for (c in 0..2) {
+                                 val label = when {
+                                     r == 0 && c == 0 -> "X"
+                                     r == 0 && c == 1 -> "Y"
+                                     r == 0 && c == 2 -> "Z"
+                                     r == 1 && c == 1 -> "Sweet Spot"
+                                     else -> ""
+                                 }
+                                 val clicked = label.isNotBlank() && label in activeButtons
+                                 val enabled = label.isNotBlank() && !(throwZone == 4 && "Sweet Spot" in activeButtons && label != "Sweet Spot")
+
+                                 Box(
+                                     modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                     contentAlignment = Alignment.Center
+                                 ) {
+                                     if (label.isNotBlank()) {
+                                         Button(
+                                             onClick = { onPress(label) },
+                                             enabled = enabled,
+                                             colors = ButtonDefaults.buttonColors(
+                                                 backgroundColor = if (clicked) successGreen else greedyPink,
+                                                 contentColor = Color.White
+                                             ),
+                                             modifier = Modifier.fillMaxSize()
+                                         ) {
+                                             Text(
+                                                 label,
+                                                 fontWeight = FontWeight.Bold,
+                                                 textAlign = TextAlign.Center,
+                                                 modifier = Modifier.graphicsLayer {
+                                                     rotationZ = -rotationDegrees.toFloat()
+                                                },
+                                                // keep labels from wrapping/clipping on small grids
+                                                maxLines = 1
+                                             )
+                                         }
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                 }
+             }
+         }
+     }
+}
+
+@Composable
+private fun GreedyZoneControlCard(
+    throwZone: Int,
+    anySquareClicked: Boolean,
+    onNextThrowZoneClockwise: () -> Unit,
+    onNextThrowZoneCounterClockwise: () -> Unit,
+    clockwiseDisabled: Boolean,
+    counterClockwiseDisabled: Boolean,
+    rotateStartingVisible: Boolean,
+    onRotateStartingZone: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(text = "Throw Zone", fontWeight = FontWeight.Bold)
+
+            Button(
+                onClick = onNextThrowZoneCounterClockwise,
+                enabled = throwZone < 4 && anySquareClicked && !counterClockwiseDisabled,
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF625B71)),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("<-- Next", color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center) }
+
+            Button(
+                onClick = onNextThrowZoneClockwise,
+                enabled = throwZone < 4 && anySquareClicked && !clockwiseDisabled,
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF625B71)),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Next -->", color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center) }
+
+            Button(
+                onClick = onRotateStartingZone,
+                enabled = rotateStartingVisible && throwZone == 1,
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF625B71)),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Rotate Start", color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center) }
+        }
+    }
+}
+
+@Composable
+private fun GreedyControlRow(
+     timerRunning: Boolean,
+     onToggleTimer: () -> Unit,
+     onReset: () -> Unit,
+ ) {
+     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
+         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                 Button(
+                     onClick = onToggleTimer,
+                     colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) warningOrange else infoBlue)
+                 ) {
+                     Text(if (timerRunning) "Stop Timer" else "Timer", color = Color.White)
+                 }
+                 Button(onClick = onReset, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFB3261E))) {
+                     Text("Reset", color = Color.White)
+                 }
+                 Spacer(modifier = Modifier.weight(1f))
+             }
+         }
+     }
+ }
 
 @Composable
 private fun GreedyQueueCard(queue: List<GreedyParticipant>, modifier: Modifier = Modifier) {
@@ -550,27 +603,25 @@ private fun GreedyImportExportCard(
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(text = "Actions", fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = onImportClick, modifier = Modifier.weight(1f)) { Text("Import") }
-                Button(onClick = onExportClick, modifier = Modifier.weight(1f)) { Text("Export") }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onImportClick, modifier = Modifier.fillMaxWidth()) { Text("Import") }
+                Button(onClick = onExportClick, modifier = Modifier.fillMaxWidth()) { Text("Export") }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = onExportCsvClick, modifier = Modifier.weight(1f)) { Text("CSV") }
-                Button(onClick = onAddTeamClick, modifier = Modifier.weight(1f)) { Text("Add") }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onExportCsvClick, modifier = Modifier.fillMaxWidth()) { Text("CSV") }
+                Button(onClick = onAddTeamClick, modifier = Modifier.fillMaxWidth()) { Text("Add") }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = onPreviousParticipant, modifier = Modifier.weight(1f)) { Text("Previous") }
-                Button(onClick = onSkipParticipant, modifier = Modifier.weight(1f)) { Text("Skip") }
-                Button(onClick = onNextParticipant, modifier = Modifier.weight(1f)) { Text("Next") }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onPreviousParticipant, modifier = Modifier.fillMaxWidth()) { Text("Previous") }
+                Button(onClick = onSkipParticipant, modifier = Modifier.fillMaxWidth()) { Text("Skip") }
+                Button(onClick = onNextParticipant, modifier = Modifier.fillMaxWidth()) { Text("Next") }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = onClearClick,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFB3261E))
-                ) {
-                    Text("Clear", color = Color.White)
-                }
+            Button(
+                onClick = onClearClick,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFB3261E))
+            ) {
+                Text("Clear", color = Color.White)
             }
         }
     }
