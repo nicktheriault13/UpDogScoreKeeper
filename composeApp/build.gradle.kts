@@ -48,6 +48,7 @@ kotlin {
         val commonMain by getting {
             resources.srcDirs("src/commonMain/resources")
             dependencies {
+                // Core Compose + coroutines/serialization are fine for JS.
                 implementation(compose.runtime)
                 implementation(compose.foundation)
                 implementation(compose.material)
@@ -64,13 +65,13 @@ kotlin {
                 implementation(libs.voyager.tabNavigator)
                 implementation(libs.voyager.transitions)
                 implementation(libs.voyager.koin)
-                
+
                 // Koin
                 implementation(libs.koin.core)
                 implementation(libs.koin.compose)
 
-                // Firebase
-                implementation(libs.firebase.auth)
+                // Firebase Auth is not available on Kotlin/JS in this setup.
+                // implementation(libs.firebase.auth)
             }
         }
         val commonTest by getting {
@@ -88,6 +89,10 @@ kotlin {
                 implementation("com.google.firebase:firebase-common-ktx")
                 implementation("org.apache.poi:poi:5.2.5")
                 implementation("org.apache.poi:poi-ooxml:5.2.5")
+
+                // Firebase (Android)
+                // Keep Android Firebase on Android source set.
+                implementation(libs.firebase.auth)
             }
             languageSettings {
                 optIn("androidx.compose.foundation.layout.ExperimentalLayoutApi")
@@ -100,19 +105,35 @@ kotlin {
                 implementation("org.apache.poi:poi-ooxml:5.2.5")
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.coroutines.swing)
+
+                // JavaFX Media provides reliable MP3 playback on Windows.
+                // (Java Sound / javax.sound.sampled typically can't decode MP3 out of the box.)
+                val javafxVersion = "21.0.2"
+                implementation("org.openjfx:javafx-base:$javafxVersion:win")
+                implementation("org.openjfx:javafx-graphics:$javafxVersion:win")
+                implementation("org.openjfx:javafx-media:$javafxVersion:win")
+                implementation("org.openjfx:javafx-swing:$javafxVersion:win")
+
+                // Firebase (Desktop/JVM)
+                implementation(libs.firebase.auth)
             }
         }
         val jsMain by getting {
             dependencies {
                 implementation(compose.html.core)
                 implementation(compose.runtime)
+                // no voyager/koin on web for now
             }
         }
-        val iosMain by creating {
-            dependsOn(commonMain)
-            iosX64().compilations.getByName("main").defaultSourceSet.dependsOn(this)
-            iosArm64().compilations.getByName("main").defaultSourceSet.dependsOn(this)
-            iosSimulatorArm64().compilations.getByName("main").defaultSourceSet.dependsOn(this)
+
+        // iOS source sets exist only when we create iOS targets (macOS).
+        if (isMacOs) {
+            val iosMain by creating {
+                dependsOn(commonMain)
+            }
+            val iosX64Main by getting { dependsOn(iosMain) }
+            val iosArm64Main by getting { dependsOn(iosMain) }
+            val iosSimulatorArm64Main by getting { dependsOn(iosMain) }
         }
     }
 }

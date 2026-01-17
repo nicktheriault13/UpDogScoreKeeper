@@ -1,17 +1,7 @@
-import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
-import cafe.adriel.voyager.navigator.Navigator
-import com.ddsk.app.di.appModule
-import com.ddsk.app.ui.screens.auth.LoginScreen
-import org.koin.compose.KoinApplication
 
+// App entry point is platform-specific:
+// - Android/Desktop can use Koin + Voyager navigation
+// - Web (JS) uses a lightweight UI (no Koin/Voyager for now)
 @Composable
-fun App() {
-    KoinApplication(application = {
-        modules(appModule)
-    }) {
-        MaterialTheme {
-            Navigator(LoginScreen())
-        }
-    }
-}
+expect fun App()

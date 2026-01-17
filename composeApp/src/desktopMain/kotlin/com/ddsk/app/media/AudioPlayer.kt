@@ -11,14 +11,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.io.Closeable
-import javax.sound.sampled.AudioSystem
-import javax.sound.sampled.Clip
+import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
+import java.util.concurrent.atomic.AtomicBoolean
+import javafx.application.Platform
+import javafx.embed.swing.JFXPanel
+import javafx.scene.media.Media
+import javafx.scene.media.MediaPlayer
 
 @Suppress("unused")
 class DesktopAudioPlayer(fileName: String) : AudioPlayer {
     private val assetPath: String = fileName
-    private var clip: Clip? = null
+    private var mediaPlayer: MediaPlayer? = null
 
     // On desktop, Dispatchers.Main might not be installed. Use Default for polling.
     private val scope = CoroutineScope(Dispatchers.Default + Job())
@@ -28,68 +33,128 @@ class DesktopAudioPlayer(fileName: String) : AudioPlayer {
     override val currentTime: StateFlow<Int> = _currentTime.asStateFlow()
 
     override val duration: Int
-        get() = (clip?.microsecondLength?.div(1000L))?.toInt() ?: 0
+        get() = (mediaPlayer
+            ?.media
+            ?.duration
+            ?.toMillis()
+            ?.takeIf { it.isFinite() }
+            ?.toInt()) ?: 0
 
     override val isPlaying: Boolean
-        get() = clip?.isRunning ?: false
+        get() = mediaPlayer?.status == MediaPlayer.Status.PLAYING
 
     init {
         try {
-            val resource = Thread.currentThread().contextClassLoader.getResource(assetPath)
-            if (resource != null) {
-                // Ensure the stream is closed to avoid file handle leaks.
-                val audioInputStream = AudioSystem.getAudioInputStream(resource)
-                try {
-                    clip = AudioSystem.getClip().apply { open(audioInputStream) }
-                } finally {
-                    (audioInputStream as? Closeable)?.close()
-                }
+            ensureJavaFxInitialized()
+
+            val loader = Thread.currentThread().contextClassLoader
+            val candidates = listOf(assetPath, "assets/$assetPath")
+
+            val resourceUrl = candidates.firstNotNullOfOrNull { path -> loader.getResource(path) }
+
+            if (resourceUrl == null) {
+                println("[DesktopAudioPlayer] Audio resource not found. Requested='$assetPath' Tried=$candidates")
+                mediaPlayer = null
             } else {
-                // If the resource isn't bundled, keep clip null and gracefully no-op.
-                clip = null
+                // JavaFX Media works best with a real file path.
+                val tempFile = createTempFileForResource(resourceUrl.toString())
+                tempFile.deleteOnExit()
+                resourceUrl.openStream().use { input -> tempFile.outputStream().use { output -> input.copyTo(output) } }
+
+                runOnFxThread {
+                    val media = Media(tempFile.toURI().toString())
+                    mediaPlayer = MediaPlayer(media).apply {
+                        setOnEndOfMedia {
+                            // Match previous behavior: stop resets time to 0.
+                            stop()
+                        }
+                        setOnError {
+                            println("[DesktopAudioPlayer] JavaFX MediaPlayer error for '$assetPath': ${error}")
+                        }
+                    }
+                }
             }
-        } catch (_: Exception) {
-            // Never crash the UI because of missing/bad audio assets.
-            clip = null
+        } catch (e: Exception) {
+            println("[DesktopAudioPlayer] Failed to initialize audio for '$assetPath': ${e::class.qualifiedName}: ${e.message}")
+            println(stacktraceToString(e))
+            mediaPlayer = null
         }
     }
 
     override fun play() {
-        clip?.let {
-            if (!it.isRunning) {
-                it.start()
-                startTimeUpdates()
-            }
+        val player = mediaPlayer ?: return
+        runOnFxThread {
+            player.play()
         }
+        startTimeUpdates()
     }
 
     override fun pause() {
-        clip?.stop()
+        val player = mediaPlayer ?: return
+        runOnFxThread { player.pause() }
         timeUpdateJob?.cancel()
     }
 
     override fun stop() {
-        clip?.stop()
-        clip?.framePosition = 0
+        val player = mediaPlayer ?: return
+        runOnFxThread {
+            player.stop()
+        }
         timeUpdateJob?.cancel()
         _currentTime.value = 0
     }
 
     override fun release() {
         timeUpdateJob?.cancel()
-        clip?.close()
-        clip = null
+        val player = mediaPlayer
+        mediaPlayer = null
+        if (player != null) {
+            runOnFxThread { player.dispose() }
+        }
     }
 
     private fun startTimeUpdates() {
         timeUpdateJob?.cancel()
         timeUpdateJob = scope.launch {
             while (isPlaying) {
-                _currentTime.value = (clip?.microsecondPosition?.div(1000L))?.toInt() ?: 0
+                val ms = mediaPlayer
+                    ?.currentTime
+                    ?.toMillis()
+                    ?.takeIf { it.isFinite() }
+                    ?.toInt() ?: 0
+                _currentTime.value = ms
                 delay(200)
             }
         }
     }
+}
+
+private fun stacktraceToString(t: Throwable): String {
+    val sw = StringWriter()
+    t.printStackTrace(PrintWriter(sw))
+    return sw.toString()
+}
+
+private val javaFxInitialized = AtomicBoolean(false)
+
+private fun ensureJavaFxInitialized() {
+    if (javaFxInitialized.compareAndSet(false, true)) {
+        // Initializes JavaFX runtime (required before using Media/MediaPlayer).
+        JFXPanel()
+    }
+}
+
+private fun runOnFxThread(block: () -> Unit) {
+    if (Platform.isFxApplicationThread()) block() else Platform.runLater(block)
+}
+
+private fun createTempFileForResource(urlString: String): File {
+    val ext = when {
+        urlString.endsWith(".mp3", ignoreCase = true) -> ".mp3"
+        urlString.endsWith(".wav", ignoreCase = true) -> ".wav"
+        else -> ".tmp"
+    }
+    return File.createTempFile("updog_audio_", ext)
 }
 
 @Composable

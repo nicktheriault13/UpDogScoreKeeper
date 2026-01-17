@@ -1,5 +1,7 @@
 package com.ddsk.app.ui.screens.timers
 
+import kotlin.random.Random
+
 sealed interface TimerAsset {
     fun resolve(): String
 }
@@ -9,7 +11,11 @@ data class SingleAsset(val fileName: String) : TimerAsset {
 }
 
 data class RandomAsset(val files: List<String>) : TimerAsset {
-    override fun resolve(): String = files.random()
+    override fun resolve(): String {
+        if (files.isEmpty()) return DEFAULT_TIMER_ASSET
+        val idx = Random.nextInt(files.size)
+        return files[idx]
+    }
 }
 
 const val DEFAULT_TIMER_ASSET = "assets/audio/sixty_seconds_timer.mp3"
@@ -54,4 +60,3 @@ fun getTimerAssetForGame(gameName: String): String {
     // Fuzzy/Prefix match if needed, or default
     return DEFAULT_TIMER_ASSET
 }
-
