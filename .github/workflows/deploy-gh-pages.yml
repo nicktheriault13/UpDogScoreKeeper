@@ -31,8 +31,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
       - name: Build web distribution
-        run: ./gradlew :composeApp:jsBrowserDistribution --no-daemon
+        run: bash ./gradlew :composeApp:jsBrowserDistribution --no-daemon
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
