@@ -12,9 +12,13 @@ class DemoAuthService : AuthService {
     override val currentUser: StateFlow<User?> = _user
 
     override suspend fun signIn(email: String, password: String) {
-        require(email.isNotBlank()) { "Email is required" }
-        require(password.isNotBlank()) { "Password is required" }
-        _user.value = User(uid = "demo", email = email, displayName = "Demo")
+        // TODO: Add validation back when implementing real authentication
+        // For now, allow empty credentials to proceed directly to the app
+        _user.value = User(
+            uid = "demo",
+            email = email.ifBlank { "demo@example.com" },
+            displayName = "Demo User"
+        )
     }
 
     override suspend fun signUp(email: String, password: String) {

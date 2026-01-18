@@ -1,6 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.gradle.api.file.DuplicatesStrategy
-import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -9,7 +8,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-@OptIn(ExperimentalWasmDsl::class)
 kotlin {
     androidTarget {
         compilations.all {
@@ -20,28 +18,6 @@ kotlin {
     }
     
     jvm("desktop")
-
-    // Web (Kotlin/JS - stable, works with Compose)
-    js(IR) {
-        moduleName = "composeApp"
-        browser {
-            commonWebpackConfig {
-                outputFileName = "composeApp.js"
-            }
-        }
-        binaries.executable()
-    }
-
-    // Web (Kotlin/Wasm - experimental)
-    wasmJs {
-        moduleName = "composeApp"
-        browser {
-            commonWebpackConfig {
-                outputFileName = "composeApp.js"
-            }
-        }
-        binaries.executable()
-    }
 
     val isMacOs = org.gradle.internal.os.OperatingSystem.current().isMacOsX
     if (isMacOs) {
@@ -139,34 +115,6 @@ kotlin {
                 implementation(libs.voyager.screenModel)
                 implementation(libs.voyager.tabNavigator)
                 implementation(libs.voyager.transitions)
-            }
-        }
-        val jsMain by getting {
-            dependencies {
-                implementation(compose.runtime)
-                implementation(compose.foundation)
-                implementation(compose.material)
-
-                // Voyager for navigation
-                implementation(libs.voyager.navigator)
-                implementation(libs.voyager.screenModel)
-                implementation(libs.voyager.tabNavigator)
-                implementation(libs.voyager.transitions)
-
-                // Koin for DI
-                implementation(libs.koin.core)
-            }
-        }
-        val wasmJsMain by getting {
-            languageSettings {
-                optIn("org.jetbrains.skiko.wasm.ExperimentalWasmApi")
-                optIn("androidx.compose.ui.ExperimentalComposeUiApi")
-            }
-            dependencies {
-                // JS target uses the same Compose UI layer (canvas-based)
-                implementation(compose.runtime)
-                implementation(compose.foundation)
-                implementation(compose.material)
             }
         }
 
