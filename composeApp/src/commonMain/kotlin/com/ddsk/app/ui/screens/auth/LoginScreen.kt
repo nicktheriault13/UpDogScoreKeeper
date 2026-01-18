@@ -16,21 +16,22 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.currentOrThrow
+import com.ddsk.app.auth.DemoAuthService
+import com.ddsk.app.ui.screens.MainScreen
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.koin.getScreenModel
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
-import com.ddsk.app.ui.screens.MainScreen
 
 class LoginScreen : Screen {
 
     @Composable
     override fun Content() {
-        val screenModel = getScreenModel<LoginScreenModel>()
+        val screenModel = rememberScreenModel { LoginScreenModel(DemoAuthService()) }
         val navigator = LocalNavigator.currentOrThrow
 
         val email by screenModel.email.collectAsState()

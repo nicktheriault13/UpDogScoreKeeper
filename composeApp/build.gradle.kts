@@ -1,5 +1,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.gradle.api.file.DuplicatesStrategy
+import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -8,6 +9,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+@OptIn(ExperimentalWasmDsl::class)
 kotlin {
     androidTarget {
         compilations.all {
@@ -19,8 +21,19 @@ kotlin {
     
     jvm("desktop")
 
-    // Web (PWA)
+    // Web (Kotlin/JS - stable, works with Compose)
     js(IR) {
+        moduleName = "composeApp"
+        browser {
+            commonWebpackConfig {
+                outputFileName = "composeApp.js"
+            }
+        }
+        binaries.executable()
+    }
+
+    // Web (Kotlin/Wasm - experimental)
+    wasmJs {
         moduleName = "composeApp"
         browser {
             commonWebpackConfig {
@@ -48,30 +61,20 @@ kotlin {
         val commonMain by getting {
             resources.srcDirs("src/commonMain/resources")
             dependencies {
-                // Core Compose + coroutines/serialization are fine for JS.
-                implementation(compose.runtime)
-                implementation(compose.foundation)
-                implementation(compose.material)
-                implementation(compose.ui)
-                implementation(compose.components.resources)
-                implementation(compose.components.uiToolingPreview)
+                // Core shared deps
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kotlinx.datetime)
                 implementation(libs.kotlinx.coroutines.core)
 
-                // Voyager
-                implementation(libs.voyager.navigator)
-                implementation(libs.voyager.screenModel)
-                implementation(libs.voyager.tabNavigator)
-                implementation(libs.voyager.transitions)
-                implementation(libs.voyager.koin)
+                // Koin core is NOT available for Kotlin/Wasm; keep it out of commonMain.
 
-                // Koin
-                implementation(libs.koin.core)
-                implementation(libs.koin.compose)
+                // Shared UI/navigation (used by common UI code)
+                implementation(compose.runtime)
+                implementation(compose.foundation)
+                implementation(compose.material)
 
-                // Firebase Auth is not available on Kotlin/JS in this setup.
-                // implementation(libs.firebase.auth)
+                // Voyager is only available for Android/Desktop/iOS (not wasmJs).
+                // Platform-specific targets add Voyager themselves.
             }
         }
         val commonTest by getting {
@@ -81,6 +84,8 @@ kotlin {
         }
         val androidMain by getting {
             dependencies {
+                // Voyager is already in commonMain; keep Android-only deps here.
+
                 implementation(libs.androidx.activity.compose)
                 implementation(libs.androidx.appcompat)
                 implementation(libs.androidx.core.ktx)
@@ -93,6 +98,14 @@ kotlin {
                 // Firebase (Android)
                 // Keep Android Firebase on Android source set.
                 implementation(libs.firebase.auth)
+
+                implementation(libs.koin.core)
+
+                // Voyager is not available for wasmJs, so add it here.
+                implementation(libs.voyager.navigator)
+                implementation(libs.voyager.screenModel)
+                implementation(libs.voyager.tabNavigator)
+                implementation(libs.voyager.transitions)
             }
             languageSettings {
                 optIn("androidx.compose.foundation.layout.ExperimentalLayoutApi")
@@ -100,6 +113,8 @@ kotlin {
         }
         val desktopMain by getting {
             dependencies {
+                // Voyager is already in commonMain; keep Desktop-only deps here.
+
                 implementation(compose.desktop.currentOs)
                 implementation("org.apache.poi:poi:5.2.5")
                 implementation("org.apache.poi:poi-ooxml:5.2.5")
@@ -116,13 +131,42 @@ kotlin {
 
                 // Firebase (Desktop/JVM)
                 implementation(libs.firebase.auth)
+
+                implementation(libs.koin.core)
+
+                // Voyager is not available for wasmJs, so add it here.
+                implementation(libs.voyager.navigator)
+                implementation(libs.voyager.screenModel)
+                implementation(libs.voyager.tabNavigator)
+                implementation(libs.voyager.transitions)
             }
         }
         val jsMain by getting {
             dependencies {
-                implementation(compose.html.core)
                 implementation(compose.runtime)
-                // no voyager/koin on web for now
+                implementation(compose.foundation)
+                implementation(compose.material)
+
+                // Voyager for navigation
+                implementation(libs.voyager.navigator)
+                implementation(libs.voyager.screenModel)
+                implementation(libs.voyager.tabNavigator)
+                implementation(libs.voyager.transitions)
+
+                // Koin for DI
+                implementation(libs.koin.core)
+            }
+        }
+        val wasmJsMain by getting {
+            languageSettings {
+                optIn("org.jetbrains.skiko.wasm.ExperimentalWasmApi")
+                optIn("androidx.compose.ui.ExperimentalComposeUiApi")
+            }
+            dependencies {
+                // JS target uses the same Compose UI layer (canvas-based)
+                implementation(compose.runtime)
+                implementation(compose.foundation)
+                implementation(compose.material)
             }
         }
 

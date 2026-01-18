@@ -147,7 +147,11 @@ object FourWayPlayScreen : Screen {
                             score = score,
                             quads = quads,
                             misses = misses,
-                            activeParticipant = participants.firstOrNull()
+                            activeParticipant = participants.firstOrNull(),
+                            allRollers = allRollers,
+                            onMiss = screenModel::addMiss,
+                            onUndo = screenModel::undo,
+                            onToggleAllRollers = screenModel::toggleAllRollers
                         )
                         Box(modifier = Modifier.weight(1f)) {
                             // Using a placeholder or actual grid component if available
@@ -165,10 +169,6 @@ object FourWayPlayScreen : Screen {
                                 onSweetSpotClick = screenModel::toggleSweetSpot
                             )
                         }
-                        ControlRow(
-                            screenModel = screenModel,
-                            onAddMiss = screenModel::addMiss
-                        )
                     }
 
                     // Right Column (Info & Actions)
@@ -242,7 +242,12 @@ object FourWayPlayScreen : Screen {
                                     }
                                     showExportDialog = true
                                 }
-                            }
+                            },
+                            onPrevious = screenModel::moveToPreviousParticipant,
+                            onSkip = screenModel::skipParticipant,
+                            onNextTeam = screenModel::moveToNextParticipant,
+                            onFlipField = screenModel::flipField,
+                            onResetRound = screenModel::resetScoring,
                          )
                     }
                 }
@@ -303,7 +308,11 @@ private fun ScoreSummaryCard(
     score: Int,
     quads: Int,
     misses: Int,
-    activeParticipant: FourWayPlayScreenModel.Participant?
+    activeParticipant: FourWayPlayScreenModel.Participant?,
+    allRollers: Boolean,
+    onMiss: () -> Unit,
+    onUndo: () -> Unit,
+    onToggleAllRollers: () -> Unit,
 ) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -313,8 +322,49 @@ private fun ScoreSummaryCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 GameHomeButton(navigator = navigator)
-                Text(text = "Score: $score", style = MaterialTheme.typography.h4)
+
+                Text(
+                    text = "Score: $score",
+                    style = MaterialTheme.typography.h4,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = onToggleAllRollers,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (allRollers) FourWayPalette.success else FourWayPalette.info,
+                            contentColor = if (allRollers) FourWayPalette.onSuccess else FourWayPalette.onInfo
+                        ),
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Text("Roller", fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = onMiss,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = FourWayPalette.error,
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Text("Miss", fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = onUndo,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = FourWayPalette.warning,
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        Text("Undo", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
+
             Spacer(modifier = Modifier.heightIn(min = 4.dp))
             Text(
                 text = "Quads: $quads • Misses: $misses",
@@ -417,10 +467,21 @@ private fun FourWayGrid(
 
 @Composable
 private fun ZoneButton(value: Int, clicked: Boolean, onClick: () -> Unit) {
+    // Keep clicked zones GREEN (React behavior). Never use disabled/grey styling.
     val colors = if (clicked) {
-        ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.success, contentColor = FourWayPalette.onSuccess)
+        ButtonDefaults.buttonColors(
+            backgroundColor = FourWayPalette.success,
+            contentColor = FourWayPalette.onSuccess,
+            disabledBackgroundColor = FourWayPalette.success,
+            disabledContentColor = FourWayPalette.onSuccess
+        )
     } else {
-        ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.primary, contentColor = FourWayPalette.onPrimary)
+        ButtonDefaults.buttonColors(
+            backgroundColor = FourWayPalette.primary,
+            contentColor = FourWayPalette.onPrimary,
+            disabledBackgroundColor = FourWayPalette.primary,
+            disabledContentColor = FourWayPalette.onPrimary
+        )
     }
     Button(
         onClick = onClick,
@@ -449,16 +510,16 @@ private fun SweetSpotButton(active: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ControlRow(screenModel: FourWayPlayScreenModel, onAddMiss: () -> Unit) {
+private fun ControlRow(screenModel: FourWayPlayScreenModel) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        ControlActionButton("Miss", FourWayPalette.error, onAddMiss)
-        ControlActionButton("Undo", FourWayPalette.warning, { screenModel.undo() })
+        ControlActionButton("Previous", FourWayPalette.warning, { screenModel.moveToPreviousParticipant() })
+        ControlActionButton("Skip", FourWayPalette.warning, { screenModel.skipParticipant() })
         ControlActionButton("Next Team", FourWayPalette.primary, { screenModel.moveToNextParticipant() })
         ControlActionButton("Flip Field", FourWayPalette.info, { screenModel.flipField() }, FourWayPalette.onInfo)
-        ControlActionButton("Reset Round", FourWayPalette.error, { screenModel.resetScoring() }) // Moved to end, dangerous action
+        ControlActionButton("Reset Round", FourWayPalette.error, { screenModel.resetScoring() })
     }
 }
 
@@ -503,14 +564,27 @@ private fun TimerCard(timerRunning: Boolean, modifier: Modifier = Modifier, onSt
 private fun ParticipantQueueCard(participants: List<FourWayPlayScreenModel.Participant>, completedCount: Int, onAddTeam: () -> Unit) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = "Teams", style = MaterialTheme.typography.h6)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Teams",
+                    style = MaterialTheme.typography.h6,
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = onAddTeam,
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text("Add Team")
+                }
+            }
             Spacer(modifier = Modifier.height(4.dp))
             Text(text = "Remaining: ${participants.size}", style = MaterialTheme.typography.caption)
             Text(text = "Completed: $completedCount", style = MaterialTheme.typography.caption)
             Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onAddTeam, modifier = Modifier.fillMaxWidth()) {
-                Text("Add Team")
-            }
             Spacer(modifier = Modifier.heightIn(min = 8.dp))
             LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
                 items(participants) { participant ->
@@ -525,15 +599,133 @@ private fun ParticipantQueueCard(participants: List<FourWayPlayScreenModel.Parti
 }
 
 @Composable
-private fun ImportExportCard(onImportClick: () -> Unit, onExportClick: () -> Unit) {
+private fun ImportExportCard(
+    onImportClick: () -> Unit,
+    onExportClick: () -> Unit,
+    onPrevious: () -> Unit,
+    onSkip: () -> Unit,
+    onNextTeam: () -> Unit,
+    onFlipField: () -> Unit,
+    onResetRound: () -> Unit,
+) {
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(text = "Data", style = MaterialTheme.typography.h6)
-            Button(onClick = onImportClick, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.info, contentColor = Color.White)) {
-                Text("Import")
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            // We want this card to fit across many device sizes without requiring scrolling.
+            // Approximate the vertical space we need and dynamically scale:
+            // - header row
+            // - 4 rows of buttons in a 2-col grid
+            // - internal paddings/spacings
+            val availableHeight = maxHeight
+
+            // Defaults (nice on desktop/tablet)
+            val basePadding = 16.dp
+            val baseGap = 10.dp
+            val baseRowGap = 8.dp
+            val baseButtonHeight = 40.dp
+            val baseFont = 14.sp
+
+            // Compute a compact version if height is constrained (typical Android phones).
+            // If maxHeight is unspecified/infinite, stick to defaults.
+            val isHeightConstrained = availableHeight != Dp.Unspecified && availableHeight != Dp.Infinity && availableHeight > 0.dp
+
+            // Estimate required height with base values.
+            // (Using conservative estimates so we don't overflow.)
+            val headerHeight = 28.dp
+            val rows = 4
+            val estimatedBaseHeight =
+                (basePadding * 2) +
+                    headerHeight +
+                    baseGap +
+                    (baseButtonHeight * rows.toFloat()) +
+                    (baseRowGap * (rows - 1).toFloat())
+
+            val scale = if (isHeightConstrained) {
+                // Keep within [0.78, 1.0] to preserve tap targets while still fitting.
+                (availableHeight / estimatedBaseHeight).coerceIn(0.78f, 1.0f)
+            } else {
+                1.0f
             }
-            Button(onClick = onExportClick, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.info, contentColor = Color.White)) {
-                Text("Export Excel")
+
+            val padding = basePadding * scale
+            val gap = baseGap * scale
+            val rowGap = baseRowGap * scale
+            val buttonHeight = (baseButtonHeight * scale).coerceAtLeast(34.dp) // keep minimum touch target-ish
+            val labelFont = (baseFont.value * scale).coerceIn(11f, 14f).sp
+
+            Column(
+                modifier = Modifier.padding(padding),
+                verticalArrangement = Arrangement.spacedBy(gap)
+            ) {
+                Text(text = "Data", style = MaterialTheme.typography.h6)
+
+                // Two-column grid of actions
+                Column(verticalArrangement = Arrangement.spacedBy(rowGap)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = onPrevious,
+                            modifier = Modifier.weight(1f).height(buttonHeight),
+                            colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.warning, contentColor = Color.White)
+                        ) {
+                            Text("Previous", fontWeight = FontWeight.Bold, fontSize = labelFont, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+
+                        Button(
+                            onClick = onSkip,
+                            modifier = Modifier.weight(1f).height(buttonHeight),
+                            colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.warning, contentColor = Color.White)
+                        ) {
+                            Text("Skip", fontWeight = FontWeight.Bold, fontSize = labelFont, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = onNextTeam,
+                            modifier = Modifier.weight(1f).height(buttonHeight),
+                            colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.primary, contentColor = Color.White)
+                        ) {
+                            Text("Next", fontWeight = FontWeight.Bold, fontSize = labelFont, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+
+                        Button(
+                            onClick = onFlipField,
+                            modifier = Modifier.weight(1f).height(buttonHeight),
+                            colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.info, contentColor = FourWayPalette.onInfo)
+                        ) {
+                            Text("Flip", fontWeight = FontWeight.Bold, fontSize = labelFont, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = onResetRound,
+                            modifier = Modifier.weight(1f).height(buttonHeight),
+                            colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.error, contentColor = Color.White)
+                        ) {
+                            Text("Reset", fontWeight = FontWeight.Bold, fontSize = labelFont, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+
+                        Button(
+                            onClick = onImportClick,
+                            modifier = Modifier.weight(1f).height(buttonHeight),
+                            colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.info, contentColor = Color.White)
+                        ) {
+                            Text("Import", fontWeight = FontWeight.Bold, fontSize = labelFont, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(rowGap), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = onExportClick,
+                            modifier = Modifier.weight(1f).height(buttonHeight),
+                            colors = ButtonDefaults.buttonColors(backgroundColor = FourWayPalette.info, contentColor = Color.White)
+                        ) {
+                            Text("Export", fontWeight = FontWeight.Bold, fontSize = labelFont, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
             }
         }
     }

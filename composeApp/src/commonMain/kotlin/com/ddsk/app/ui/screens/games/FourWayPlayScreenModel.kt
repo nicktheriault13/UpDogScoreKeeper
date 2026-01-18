@@ -262,6 +262,7 @@ class FourWayPlayScreenModel : ScreenModel {
         _quads.value = 0
         _misses.value = 0
         _zoneCatchMap.clear()
+        _allRollers.value = false
 
         logRoundEvent("Reset Scoring (${currentTeamDisplay()}) | ${snapshotStateForLog()}")
     }
@@ -335,6 +336,7 @@ class FourWayPlayScreenModel : ScreenModel {
         _quads.value = 0
         _misses.value = 0
         _zoneCatchMap.clear()
+        _allRollers.value = false
 
         _currentParticipantLog.value = emptyList()
 
@@ -358,21 +360,77 @@ class FourWayPlayScreenModel : ScreenModel {
 
     fun moveToPreviousParticipant() {
         if (_participants.value.size <= 1) return
+
+        // React behavior: move the last participant to the front (no commit/export)
         val list = _participants.value
         val last = list.last()
         _participants.value = listOf(last) + list.dropLast(1)
+
+        // Silent reset for the new active participant
+        pushSnapshot()
+        _score.value = 0
+        _clickedZones.value = emptySet()
+        _sweetSpotClicked.value = false
+        _quads.value = 0
+        _misses.value = 0
+        _zoneCatchMap.clear()
+        _allRollers.value = false
+        _currentParticipantLog.value = emptyList()
+
         recordSidebarAction("Previous participant")
         logRoundEvent("Previous pressed | now active=${currentTeamDisplay()}")
         persistState()
     }
 
     fun skipParticipant() {
+        if (_participants.value.size <= 1) return
+
+        // React behavior: move current participant to the end (no commit/export)
         logRoundEvent("Skip pressed (${currentTeamDisplay()})")
-        moveToNextParticipant()
+        val list = _participants.value
+        val first = list.first()
+        _participants.value = list.drop(1) + first
+
+        // Silent reset for the new active participant
+        pushSnapshot()
+        _score.value = 0
+        _clickedZones.value = emptySet()
+        _sweetSpotClicked.value = false
+        _quads.value = 0
+        _misses.value = 0
+        _zoneCatchMap.clear()
+        _allRollers.value = false
+        _currentParticipantLog.value = emptyList()
+
         recordSidebarAction("Participant skipped")
         persistState()
     }
 
+    /** React behavior: toggles All Rollers state for the CURRENT round/team and logs the event. */
+    fun toggleAllRollers() {
+        pushSnapshot()
+        _allRollers.value = !_allRollers.value
+        logRoundEvent("All Rollers pressed. State: ${snapshotStateForLog()}")
+        persistState()
+    }
+
+    /** Toggle the collapsible sidebar state (kept for parity with other game screens). */
+    fun toggleSidebarCollapsed() {
+        _sidebarCollapsed.value = !_sidebarCollapsed.value
+        recordSidebarAction("Sidebar ${if (_sidebarCollapsed.value) "collapsed" else "expanded"}")
+        persistState()
+    }
+
+    /**
+     * Updates the last-sidebar-action banner text and also appends it to the per-participant log
+     * so it appears in the JSON export (React behavior).
+     */
+    fun recordSidebarAction(action: String) {
+        _lastSidebarAction.value = action
+        logRoundEvent(action)
+    }
+
+    /** Compatibility alias for the screen: import participants from a CSV text blob. */
     fun importParticipantsFromCsv(csvText: String) {
         val imported = parseCsv(csvText)
         val participants = imported.map { Participant(it.handler, it.dog, it.utn, it.heightDivision) }
@@ -382,6 +440,7 @@ class FourWayPlayScreenModel : ScreenModel {
         persistState()
     }
 
+    /** Compatibility alias for the screen: import participants from an XLSX byte array. */
     fun importParticipantsFromXlsx(xlsxData: ByteArray) {
         val imported = parseXlsx(xlsxData)
         val participants = imported.map { Participant(it.handler, it.dog, it.utn, it.heightDivision) }
@@ -391,25 +450,14 @@ class FourWayPlayScreenModel : ScreenModel {
         persistState()
     }
 
-    fun exportParticipantsAsCsv(): String {
-        return buildString {
-            append("Handler,Dog,UTN\n")
-            _participants.value.forEach { p ->
-                append("${p.handler},${p.dog},${p.utn}\n")
-            }
-        }
+    /** Compatibility alias for the screen: add a miss for the current round. */
+    fun addMiss() {
+        pushSnapshot()
+        _misses.value += 1
+        logRoundEvent("Miss pressed (${currentTeamDisplay()}) | ${snapshotStateForLog()}")
     }
 
-    fun exportLog(): String {
-        return "Log export not implemented yet."
-    }
-
-    fun recordSidebarAction(action: String) {
-        _lastSidebarAction.value = action
-        // Keep a per-participant log buffer for JSON export.
-        logRoundEvent(action)
-    }
-
+    /** Compatibility alias for the screen: undo last scoring action. */
     fun undo() {
         if (undoStack.isNotEmpty()) {
             val snapshot = undoStack.removeLast()
@@ -418,25 +466,20 @@ class FourWayPlayScreenModel : ScreenModel {
             _clickedZones.value = snapshot.clickedZones
             _sweetSpotClicked.value = snapshot.sweetSpot
             _misses.value = snapshot.misses
-
             logRoundEvent("Undo | ${snapshotStateForLog()}")
         }
     }
 
+    /** Compatibility alias for the screen: toggle sweet spot for the current round. */
     fun toggleSweetSpot() {
         pushSnapshot()
         _sweetSpotClicked.value = !_sweetSpotClicked.value
-        if (_sweetSpotClicked.value) _score.value += 1 else _score.value -= 1 // Example scoring
-
+        // React behavior: sweet spot is worth 2 points.
+        if (_sweetSpotClicked.value) _score.value += 2 else _score.value -= 2
         logRoundEvent("Sweet Spot pressed (${currentTeamDisplay()}) | ${snapshotStateForLog()}")
     }
 
-    fun addMiss() {
-        pushSnapshot()
-        _misses.value += 1
-        logRoundEvent("Miss pressed (${currentTeamDisplay()}) | ${snapshotStateForLog()}")
-    }
-
+    /** Compatibility alias for the screen: flip the field orientation. */
     fun flipField() {
         _fieldFlipped.value = !_fieldFlipped.value
         logRoundEvent("Flip Field pressed | flipped=${_fieldFlipped.value}")

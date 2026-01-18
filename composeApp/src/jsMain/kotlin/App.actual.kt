@@ -1,11 +1,13 @@
+import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
-import org.jetbrains.compose.web.dom.Div
-import org.jetbrains.compose.web.dom.Text
+import cafe.adriel.voyager.navigator.Navigator
+import com.ddsk.app.ui.screens.auth.LoginScreen
 
 @Composable
 actual fun App() {
-    // Minimal web UI for now (no Voyager/Koin on JS target yet).
-    Div {
-        Text("UpDogScoreKeeper (Web)")
+    // Web/JS: Full UI without Koin DI (screens create their own models).
+    // Uses DemoAuthService (no Firebase on web).
+    MaterialTheme {
+        Navigator(LoginScreen())
     }
 }
