@@ -99,6 +99,8 @@ object FourWayPlayScreen : Screen {
         val scope = rememberCoroutineScope()
 
         var showAddParticipant by remember { mutableStateOf(false) }
+        var showClearTeamsDialog by remember { mutableStateOf(false) }
+        var showResetRoundDialog by remember { mutableStateOf(false) }
         var handlerInput by remember { mutableStateOf("") }
         var dogInput by remember { mutableStateOf("") }
         var utnInput by remember { mutableStateOf("") }
@@ -200,7 +202,7 @@ object FourWayPlayScreen : Screen {
 
                         // Team Management section
                         TeamManagementCard(
-                            onClearTeams = { /* Clear Teams */ },
+                            onClearTeams = { showClearTeamsDialog = true },
                             onImport = { filePicker.launch() },
                             onAddTeam = { showAddParticipant = true },
                             onExport = {
@@ -255,7 +257,7 @@ object FourWayPlayScreen : Screen {
                                 }
                             },
                             onLog = { /* LOG */ },
-                            onResetRound = screenModel::resetScoring,
+                            onResetRound = { showResetRoundDialog = true },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -379,6 +381,61 @@ object FourWayPlayScreen : Screen {
                 },
                 dismissButton = {
                     Button(onClick = { showAddParticipant = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showClearTeamsDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearTeamsDialog = false },
+                title = { Text("Clear All Teams?") },
+                text = { Text("Are you sure you want to clear all teams? This action cannot be undone.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            // Call clear teams function when implemented
+                            // screenModel.clearParticipants()
+                            showClearTeamsDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Clear")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showClearTeamsDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showResetRoundDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetRoundDialog = false },
+                title = { Text("Reset Round?") },
+                text = { Text("Are you sure you want to reset the current round? All scores will be lost. This action cannot be undone.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            screenModel.resetScoring()
+                            showResetRoundDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Reset")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showResetRoundDialog = false }) {
                         Text("Cancel")
                     }
                 }

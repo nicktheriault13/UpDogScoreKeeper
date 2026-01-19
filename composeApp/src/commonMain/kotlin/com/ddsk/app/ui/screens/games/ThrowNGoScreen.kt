@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -66,6 +68,8 @@ object ThrowNGoScreen : Screen {
         val scope = rememberCoroutineScope()
 
         var showAddParticipant by remember { mutableStateOf(false) }
+        var showClearTeamsDialog by remember { mutableStateOf(false) }
+        var showResetRoundDialog by remember { mutableStateOf(false) }
 
         var showImportModeDialog by remember { mutableStateOf(false) }
         var pendingImportResult by remember { mutableStateOf<ImportResult?>(null) }
@@ -103,84 +107,164 @@ object ThrowNGoScreen : Screen {
 
         Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                // Home button is rendered inside the score card to avoid overlap.
-
-                val columnSpacing = 16.dp
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(columnSpacing),
-                    horizontalArrangement = Arrangement.spacedBy(columnSpacing)
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Left (main gameplay) column
-                    Column(
-                        modifier = Modifier
-                            .weight(2f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                    // Top row: Header card and Timer/Queue
+                    Row(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        ThrowNGoScoreSummaryCard(
+                        // Left: Header card with stats and score
+                        ThrowNGoHeaderCard(
                             navigator = navigator,
                             uiState = uiState,
                             onUndo = screenModel::undo,
-                            onAllRollers = screenModel::toggleAllRollers,
-                            allRollersActive = uiState.scoreState.allRollersActive,
                             onMiss = screenModel::incrementMiss,
-                            onOb = screenModel::incrementOb
-                        )
-
-                        Box(modifier = Modifier.weight(1f)) {
-                            ScoringGrid(onScore = screenModel::recordThrow)
-                        }
-
-                        ThrowNGoControlRow(
-                            timerRunning = timerRunning,
-                            timeLeft = timeLeft,
-                            onTimerToggle = { if (timerRunning) screenModel.stopTimer() else screenModel.startTimer() },
-                            onUndo = screenModel::undo,
+                            onOb = screenModel::incrementOb,
+                            onAllRollers = screenModel::toggleAllRollers,
                             onSweetSpot = screenModel::toggleSweetSpot,
-                            sweetSpotActive = uiState.scoreState.sweetSpotActive,
-                            onFlipField = screenModel::flipField,
-                            onNext = screenModel::nextParticipant,
-                            onSkip = screenModel::skipParticipant
+                            modifier = Modifier.weight(2f).fillMaxHeight()
                         )
-                    }
 
-                    // Right (queue + import/export) column
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
-                    ) {
+                        // Right: Timer only
                         ThrowNGoTimerCard(
                             timerRunning = timerRunning,
                             timeLeft = timeLeft,
                             onStartStop = { if (timerRunning) screenModel.stopTimer() else screenModel.startTimer() },
-                            onReset = screenModel::resetTimer
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        )
+                    }
+
+                    // Middle row: Main game grid and Team Management
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Main grid (center)
+                        ScoringGrid(
+                            fieldFlipped = uiState.fieldFlipped,
+                            onScore = screenModel::recordThrow,
+                            modifier = Modifier.weight(1f)
                         )
 
-                        ParticipantList(uiState = uiState, modifier = Modifier.fillMaxWidth().weight(1f))
+                        // Right side: Queue and Team Management
+                        Column(
+                            modifier = Modifier.weight(0.3f).fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Queue card showing teams in queue
+                            ThrowNGoQueueCard(
+                                participants = uiState.queue,
+                                modifier = Modifier.weight(1f)
+                            )
 
-                        ThrowNGoImportExportCard(
-                            onImportClick = { filePicker.launch() },
-                            onExportClick = {
-                                val template = assetLoader.load("templates/UDC Throw N Go Data Entry L1 or L2 Div Sort.xlsx")
-                                if (template != null) {
-                                    val bytes = screenModel.exportScoresXlsx(template)
-                                    exporter.save("ThrowNGo_Scores.xlsx", bytes)
+                            // Team Management section
+                            ThrowNGoTeamManagementCard(
+                                onClearTeams = { showClearTeamsDialog = true },
+                                onImport = { filePicker.launch() },
+                                onAddTeam = { showAddParticipant = true },
+                                onExport = {
+                                    val template = assetLoader.load("templates/UDC Throw N Go Data Entry L1 or L2 Div Sort.xlsx")
+                                    if (template != null) {
+                                        val bytes = screenModel.exportScoresXlsx(template)
+                                        exporter.save("ThrowNGo_Scores.xlsx", bytes)
+                                    }
+                                },
+                                onLog = {
+                                    val content = screenModel.exportLog()
+                                    scope.launch {
+                                        saveJsonFileWithPicker("ThrowNGo_Log.txt", content)
+                                    }
+                                },
+                                onResetRound = { showResetRoundDialog = true },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // Bottom row: Navigation buttons aligned below the grid
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Navigation buttons below the scoring grid
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = screenModel::flipField,
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("↕ FLIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                 }
-                            },
-                            onExportLogClick = {
-                                val content = screenModel.exportLog()
-                                scope.launch {
-                                    saveJsonFileWithPicker("ThrowNGo_Log.txt", content)
+                            }
+
+                            Button(
+                                onClick = screenModel::previousParticipant,
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("◄◄ PREV", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                 }
-                            },
-                            onAddTeamClick = { showAddParticipant = true },
-                            onPreviousClick = screenModel::previousParticipant,
-                            onClearClick = screenModel::clearParticipants
-                        )
+                            }
+
+                            Button(
+                                onClick = screenModel::nextParticipant,
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("► NEXT", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+
+                            Button(
+                                onClick = screenModel::skipParticipant,
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("►► SKIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+                        }
+
+                        // Empty spacer to align with right column
+                        Spacer(modifier = Modifier.weight(0.3f))
                     }
                 }
             }
@@ -242,79 +326,225 @@ object ThrowNGoScreen : Screen {
                 }
             )
         }
+
+        if (showClearTeamsDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearTeamsDialog = false },
+                title = { Text("Clear All Teams?") },
+                text = { Text("Are you sure you want to clear all teams? This action cannot be undone.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            screenModel.clearParticipants()
+                            showClearTeamsDialog = false
+                        }
+                    ) {
+                        Text("Clear", color = Color(0xFFD50000))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearTeamsDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showResetRoundDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetRoundDialog = false },
+                title = { Text("Reset Round?") },
+                text = { Text("Are you sure you want to reset the current round? All scores will be lost. This action cannot be undone.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            // Call reset round function when implemented
+                            // screenModel.resetRound()
+                            showResetRoundDialog = false
+                        }
+                    ) {
+                        Text("Reset", color = Color(0xFFD50000))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetRoundDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
     }
 }
 
 @Composable
-private fun ThrowNGoScoreSummaryCard(
+private fun ThrowNGoHeaderCard(
     navigator: cafe.adriel.voyager.navigator.Navigator,
     uiState: ThrowNGoUiState,
     onUndo: () -> Unit,
-    onAllRollers: () -> Unit,
-    allRollersActive: Boolean,
     onMiss: () -> Unit,
-    onOb: () -> Unit
+    onOb: () -> Unit,
+    onAllRollers: () -> Unit,
+    onSweetSpot: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Column 1: Title and UNDO button
+            Column(
+                modifier = Modifier.weight(0.7f),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                GameHomeButton(navigator = navigator)
-                Text(text = "Score: ${uiState.scoreState.score}", style = MaterialTheme.typography.h4)
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "Catches: ${uiState.scoreState.catches} • Bonus: ${uiState.scoreState.bonusCatches}",
-                    style = MaterialTheme.typography.body2,
-                    color = Color(0xFF49454F)
-                )
-            }
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GameHomeButton(navigator = navigator)
+                        Text(
+                            text = "Throw N Go",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
 
-            val active = uiState.activeParticipant
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Misses: ${uiState.scoreState.misses} • OB: ${uiState.scoreState.ob}",
-                    style = MaterialTheme.typography.body2,
-                    color = Color(0xFF49454F)
-                )
-                Text(
-                    text = active?.let { "Active: ${it.handler} & ${it.dog}" } ?: "No active team",
-                    style = MaterialTheme.typography.subtitle1,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            // Action buttons moved here from the control row.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(onClick = onUndo) { Text("Undo") }
+                    val active = uiState.activeParticipant
+                    Text(
+                        text = active?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
+                        fontSize = 13.sp,
+                        color = Color.DarkGray
+                    )
+                }
 
                 Button(
-                    onClick = onAllRollers,
+                    onClick = onUndo,
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = if (allRollersActive) Color(0xFF00C853) else Color(0xFF2979FF)
-                    )
+                        backgroundColor = Color(0xFFD50000),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.width(100.dp).height(42.dp)
                 ) {
-                    Text("All Rollers", color = Color.White)
+                    Text("UNDO", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+            }
+
+            // Column 2: Main stats
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("Catches:", fontSize = 14.sp)
+                    Text("${uiState.scoreState.catches}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("Bonus Catches:", fontSize = 14.sp)
+                    Text("${uiState.scoreState.bonusCatches}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
 
-                Button(onClick = onMiss, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFD50000))) {
-                    Text("Miss", color = Color.White)
+                // MISS and OB buttons in same row
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Miss button (red background)
+                    Button(
+                        onClick = onMiss,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("MISS", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("${uiState.scoreState.misses}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+
+                    // OB button
+                    Button(
+                        onClick = onOb,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFFF8A50),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("OB", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("${uiState.scoreState.ob}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
                 }
-                Button(onClick = onOb, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFFFB74D))) {
-                    Text("OB", color = Color(0xFF442800))
+            }
+
+            // Column 3: Score and special buttons
+            Column(
+                modifier = Modifier.weight(0.8f),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(horizontalAlignment = Alignment.End) {
+                    // Score on one line
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text("Score: ", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = uiState.scoreState.score.toString(),
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.weight(1f))
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Sweet Spot button
+                    Button(
+                        onClick = onSweetSpot,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (uiState.scoreState.sweetSpotActive) Color(0xFF00C853) else Color(0xFF9E9E9E),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("SWEET SPOT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+
+                    // All Rollers button
+                    Button(
+                        onClick = onAllRollers,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (uiState.scoreState.allRollersActive) Color(0xFF00C853) else Color(0xFF9E9E9E),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("ALL ROLLERS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
             }
         }
     }
@@ -325,21 +555,250 @@ private fun ThrowNGoTimerCard(
     timerRunning: Boolean,
     timeLeft: Int,
     onStartStop: () -> Unit,
-    onReset: () -> Unit
+    modifier: Modifier = Modifier
 ) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Top row: TIMER and PAUSE buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { if (!timerRunning) onStartStop() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("▶", fontSize = 16.sp)
+                        Text("TIMER", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { if (timerRunning) onStartStop() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⏸", fontSize = 16.sp)
+                        Text("PAUSE", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Bottom row: EDIT and RESET buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { /* Edit */ },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✎", fontSize = 16.sp)
+                        Text("EDIT", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { /* Reset */ },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("↻", fontSize = 16.sp)
+                        Text("RESET", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Time Remaining display
+            Text(
+                "Time Remaining: ${timeLeft}s",
+                fontSize = 11.sp,
+                color = Color.Gray,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThrowNGoQueueCard(
+    participants: List<ThrowNGoParticipant>,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth().fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                "Queue",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+
+            // Display teams in queue - scrollable list that fills available space
+            // Shows at least 5 teams without scrolling when space allows
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (participants.isEmpty()) {
+                    item {
+                        Text(
+                            "No teams in queue",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(vertical = 8.dp))
+                        }
+                    }
+                 else {
+                    items(count = participants.size) { index ->
+                        val participant = participants[index]
+                        val isCurrentTeam = index == 0
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = if (isCurrentTeam) Color(0xFFE3F2FD) else Color.White,
+                            elevation = if (isCurrentTeam) 2.dp else 0.dp,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                horizontalArrangement = Arrangement.Start,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (isCurrentTeam) "▶ ${participant.handler} & ${participant.dog}"
+                                           else "${participant.handler} & ${participant.dog}",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isCurrentTeam) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isCurrentTeam) Color(0xFF1976D2) else Color.Black
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThrowNGoTeamManagementCard(
+    onClearTeams: () -> Unit,
+    onImport: () -> Unit,
+    onAddTeam: () -> Unit,
+    onExport: () -> Unit,
+    onLog: () -> Unit,
+    onResetRound: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Button(
-                onClick = onStartStop,
-                colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) Color(0xFFFFB74D) else Color(0xFF2196F3))
+                onClick = onClearTeams,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFF7B1FA2),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
             ) {
-                Text(if (timerRunning) "${timeLeft}s" else "Timer", color = Color.White)
+                Text("CLEAR TEAMS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
             }
-            Button(onClick = onReset, enabled = !timerRunning) { Text("Reset") }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onImport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("IMPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onAddTeam,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("ADD TEAM", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onExport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("EXPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onLog,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("LOG", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Button(
+                onClick = onResetRound,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFFD50000),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("RESET ROUND", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
         }
     }
 }
@@ -418,8 +877,8 @@ private fun ThrowNGoControlRow(
 // Log display intentionally removed from the gameplay screen.
 
 @Composable
-private fun ScoringGrid(onScore: (Int, Boolean) -> Unit) {
-    Card(shape = RoundedCornerShape(18.dp), elevation = 8.dp, modifier = Modifier.fillMaxSize()) {
+private fun ScoringGrid(fieldFlipped: Boolean, onScore: (Int, Boolean) -> Unit, modifier: Modifier = Modifier) {
+    Card(shape = RoundedCornerShape(18.dp), elevation = 8.dp, modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -434,6 +893,9 @@ private fun ScoringGrid(onScore: (Int, Boolean) -> Unit) {
 
             rows.forEachIndexed { rowIndex, rowValues ->
                 val isBonusRow = rowIndex == 1
+                // Reverse column order when field is flipped
+                val displayValues = if (fieldFlipped) rowValues.reversed() else rowValues
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -441,7 +903,7 @@ private fun ScoringGrid(onScore: (Int, Boolean) -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    rowValues.forEach { value ->
+                    displayValues.forEach { value ->
                         Button(
                             onClick = { onScore(value, isBonusRow) },
                             colors = ButtonDefaults.buttonColors(
