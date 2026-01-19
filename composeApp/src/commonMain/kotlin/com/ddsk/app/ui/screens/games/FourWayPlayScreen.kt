@@ -126,73 +126,84 @@ object FourWayPlayScreen : Screen {
         }
 
         Surface(modifier = Modifier.fillMaxSize()) {
-            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                // Home button is rendered inside the score card to avoid overlap.
-                val columnSpacing = 16.dp
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Top row
                 Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(columnSpacing),
-                    horizontalArrangement = Arrangement.spacedBy(columnSpacing)
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Left Column (Game Area)
+                    // Left: Header card with stats and score
+                    HeaderCard(
+                        navigator = navigator,
+                        score = score,
+                        quads = quads,
+                        misses = misses,
+                        activeParticipant = participants.firstOrNull(),
+                        onUndo = screenModel::undo,
+                        onMissClick = screenModel::addMiss,
+                        onOBCatchClick = { /* OB Catch */ },
+                        onAllRollersClick = screenModel::toggleAllRollers,
+                        allRollers = allRollers,
+                        modifier = Modifier.weight(2f).fillMaxHeight()
+                    )
+
+                    // Right: Timer and controls
                     Column(
-                        modifier = Modifier
-                            .weight(2f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        ScoreSummaryCard(
-                            navigator = navigator,
-                            score = score,
-                            quads = quads,
-                            misses = misses,
-                            activeParticipant = participants.firstOrNull(),
-                            allRollers = allRollers,
-                            onMiss = screenModel::addMiss,
-                            onUndo = screenModel::undo,
-                            onToggleAllRollers = screenModel::toggleAllRollers
+                        TimerCard(
+                            timerRunning = timerRunning,
+                            modifier = Modifier.fillMaxWidth(),
+                            onStartStop = { timerRunning = !timerRunning }
                         )
-                        Box(modifier = Modifier.weight(1f)) {
-                            // Using a placeholder or actual grid component if available
-                            // Ensure FourWayPlayGrid or similar is defined
-                            // MainGrid(
-                            // ...
-                            // )
-                            // Replacing with FourWayGrid which should be defined below
-                            FourWayGrid(
-                                clickedZones = clickedZones,
-                                fieldFlipped = fieldFlipped,
-                                sweetSpot = sweetSpot,
-                                allRollers = allRollers,
-                                onZoneClick = { screenModel.handleZoneClick(it) },
-                                onSweetSpotClick = screenModel::toggleSweetSpot
-                            )
-                        }
+
+                        ParticipantQueueCard(
+                            participants = participants,
+                            completedCount = completed.size,
+                            onAddTeam = { showAddParticipant = true }
+                        )
                     }
+                }
 
-                    // Right Column (Info & Actions)
+                // Middle row - Main game grid
+                Row(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Main grid (center)
+                    FourWayGrid(
+                        clickedZones = clickedZones,
+                        fieldFlipped = fieldFlipped,
+                        sweetSpot = sweetSpot,
+                        allRollers = allRollers,
+                        onZoneClick = { screenModel.handleZoneClick(it) },
+                        onSweetSpotClick = screenModel::toggleSweetSpot,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Right side: Queue and Team Management
                     Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                        modifier = Modifier.weight(0.3f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                         TimerCard(
-                             timerRunning = timerRunning,
-                             modifier = Modifier.fillMaxWidth(),
-                             onStartStop = { timerRunning = !timerRunning }
-                         )
+                        // Queue card showing teams in queue
+                        QueueCard(
+                            participants = participants,
+                            modifier = Modifier.weight(1f)
+                        )
 
-                         ParticipantQueueCard(
-                             participants = participants,
-                             completedCount = completed.size,
-                             onAddTeam = { showAddParticipant = true }
-                         )
-
-                         ImportExportCard(
-                            onImportClick = { filePicker.launch() },
-                            onExportClick = {
+                        // Team Management section
+                        TeamManagementCard(
+                            onClearTeams = { /* Clear Teams */ },
+                            onImport = { filePicker.launch() },
+                            onAddTeam = { showAddParticipant = true },
+                            onExport = {
                                 scope.launch {
                                     val scored = screenModel.getParticipantsForExport()
                                     if (scored.isEmpty()) {
@@ -243,13 +254,94 @@ object FourWayPlayScreen : Screen {
                                     showExportDialog = true
                                 }
                             },
-                            onPrevious = screenModel::moveToPreviousParticipant,
-                            onSkip = screenModel::skipParticipant,
-                            onNextTeam = screenModel::moveToNextParticipant,
-                            onFlipField = screenModel::flipField,
+                            onLog = { /* LOG */ },
                             onResetRound = screenModel::resetScoring,
-                         )
+                            modifier = Modifier.weight(1f)
+                        )
                     }
+                }
+
+                // Bottom row - Navigation buttons aligned below the grid
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Navigation buttons below the scoring grid
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = screenModel::flipField,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4), // Purple
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("↕ FLIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = screenModel::moveToPreviousParticipant,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4), // Purple
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("◄◄ PREV", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = screenModel::moveToNextParticipant,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4), // Purple
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("► NEXT", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = screenModel::skipParticipant,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4), // Purple
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("►► SKIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+                    }
+
+                    // Empty spacer to align with right column
+                    Spacer(modifier = Modifier.weight(0.3f))
                 }
             }
         }
@@ -303,80 +395,155 @@ object FourWayPlayScreen : Screen {
 }
 
 @Composable
-private fun ScoreSummaryCard(
+private fun HeaderCard(
     navigator: cafe.adriel.voyager.navigator.Navigator,
     score: Int,
     quads: Int,
     misses: Int,
     activeParticipant: FourWayPlayScreenModel.Participant?,
-    allRollers: Boolean,
-    onMiss: () -> Unit,
     onUndo: () -> Unit,
-    onToggleAllRollers: () -> Unit,
+    onMissClick: () -> Unit,
+    onOBCatchClick: () -> Unit,
+    onAllRollersClick: () -> Unit,
+    allRollers: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Column 1: Title and UNDO button
+            Column(
+                modifier = Modifier.weight(0.7f),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                GameHomeButton(navigator = navigator)
-
-                Text(
-                    text = "Score: $score",
-                    style = MaterialTheme.typography.h4,
-                    modifier = Modifier.weight(1f)
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = onToggleAllRollers,
-                        colors = ButtonDefaults.buttonColors(
-                            backgroundColor = if (allRollers) FourWayPalette.success else FourWayPalette.info,
-                            contentColor = if (allRollers) FourWayPalette.onSuccess else FourWayPalette.onInfo
-                        ),
-                        modifier = Modifier.height(44.dp)
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("Roller", fontWeight = FontWeight.Bold)
+                        GameHomeButton(navigator = navigator)
+                        Text(
+                            text = "4 Way Play L1",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
 
-                    Button(
-                        onClick = onMiss,
-                        colors = ButtonDefaults.buttonColors(
-                            backgroundColor = FourWayPalette.error,
-                            contentColor = Color.White
-                        ),
-                        modifier = Modifier.height(44.dp)
-                    ) {
-                        Text("Miss", fontWeight = FontWeight.Bold)
-                    }
+                    Text(
+                        text = "# Discs Allowed: 4",
+                        fontSize = 10.sp,
+                        color = Color.DarkGray
+                    )
+                }
 
-                    Button(
-                        onClick = onUndo,
-                        colors = ButtonDefaults.buttonColors(
-                            backgroundColor = FourWayPalette.warning,
-                            contentColor = Color.White
-                        ),
-                        modifier = Modifier.height(44.dp)
+                Button(
+                    onClick = onUndo,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFFD50000),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.width(80.dp).height(32.dp)
+                ) {
+                    Text("UNDO", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+
+            // Column 2: Main stats
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Spacer(modifier = Modifier.height(26.dp))
+
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("Catches Scored:", fontSize = 11.sp)
+                    Text("$score", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("Quads Completed:", fontSize = 11.sp)
+                    Text("$quads", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // OB Catches button
+                Button(
+                    onClick = onOBCatchClick,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFFFF8A50),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(30.dp),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Undo", fontWeight = FontWeight.Bold)
+                        Text("OB CATCH", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        Text("0", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                // Missed Catches button
+                Button(
+                    onClick = onMissClick,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFFFF8A50),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(30.dp),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("MISS", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        Text("$misses", fontWeight = FontWeight.Bold, fontSize = 10.sp)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.heightIn(min = 4.dp))
-            Text(
-                text = "Quads: $quads • Misses: $misses",
-                style = MaterialTheme.typography.body2
-            )
-            Spacer(modifier = Modifier.heightIn(min = 8.dp))
-            val active = activeParticipant
-            Text(
-                text = active?.let { "Active: ${it.handler} & ${it.dog} (${it.utn})" } ?: "No active team",
-                style = MaterialTheme.typography.subtitle1,
-                fontWeight = FontWeight.Bold
-            )
+            // Column 3: Score and All Rollers
+            Column(
+                modifier = Modifier.weight(0.8f),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Sweet Spot Bonus:", fontSize = 10.sp, color = Color.Gray)
+
+                    // Score on one line
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text("Score: ", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = score.toString(),
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
+                }
+
+                // All Rollers button
+                Button(
+                    onClick = onAllRollersClick,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = if (allRollers) Color(0xFF00C853) else Color(0xFF9E9E9E),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(30.dp),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text("ALL ROLLERS", fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                }
+            }
         }
     }
 }
@@ -398,19 +565,35 @@ private fun FourWayGrid(
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val horizontalPadding = 16.dp
+            val verticalPadding = 16.dp
             val interCellSpacing = 12.dp
-            // Calculations similar to BoomGrid for consistency
-            val gridWidth = (maxWidth - horizontalPadding * 2).coerceAtLeast(0.dp)
-            val widthLimitedCell = ((gridWidth - interCellSpacing * 2) / 3).coerceAtLeast(60.dp) // 3 columns
 
-            val hasFiniteHeight = maxHeight != Dp.Unspecified && maxHeight != Dp.Infinity && maxHeight > 0.dp
-            val heightLimitedCell = if (hasFiniteHeight) {
-                val totalSpacing = interCellSpacing * 2
-                (((maxHeight - totalSpacing) / 3).coerceAtLeast(60.dp)) // 3 rows mostly
-            } else {
-                widthLimitedCell
-            }
-            val cellSize = minOf(widthLimitedCell, heightLimitedCell)
+            // Calculate grid dimensions based on requirements:
+            // - Top/bottom rows same height
+            // - Each column twice as wide as top row height
+            // - Center row as tall as it is wide (square)
+
+            val availableWidth = (maxWidth - horizontalPadding * 2).coerceAtLeast(0.dp)
+            val availableHeight = (maxHeight - verticalPadding * 2).coerceAtLeast(0.dp)
+
+            // From width: 6h + 2*spacing = availableWidth
+            // h = (availableWidth - 2*spacing) / 6
+            val topRowHeightFromWidth = ((availableWidth - interCellSpacing * 2) / 6).coerceAtLeast(30.dp)
+
+            // From height: 2h + 2h + 2*spacing = availableHeight (top + center + bottom + spacing)
+            // 4h + 2*spacing = availableHeight
+            // h = (availableHeight - 2*spacing) / 4
+            val topRowHeightFromHeight = ((availableHeight - interCellSpacing * 2) / 4).coerceAtLeast(30.dp)
+
+            // Use the smaller of the two constraints to ensure it fits
+            val topRowHeight = minOf(topRowHeightFromWidth, topRowHeightFromHeight).coerceIn(30.dp, 120.dp)
+            val columnWidth = topRowHeight * 2
+            val centerRowHeight = columnWidth // Square: height = width
+
+            val finalTopRowHeight = topRowHeight
+            val finalColumnWidth = columnWidth
+            val finalCenterRowHeight = centerRowHeight
+            val finalSpacing = interCellSpacing
 
             val rowOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
             val colOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
@@ -418,22 +601,25 @@ private fun FourWayGrid(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = horizontalPadding, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(interCellSpacing, Alignment.CenterVertically),
+                    .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+                verticalArrangement = Arrangement.spacedBy(finalSpacing, Alignment.CenterVertically),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 rowOrder.forEach { row ->
-                    val rowHeight = if (row == 1) cellSize * 1.2f else cellSize
+                    val rowHeight = when (row) {
+                        1 -> finalCenterRowHeight
+                        else -> finalTopRowHeight
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(rowHeight),
-                        horizontalArrangement = Arrangement.spacedBy(interCellSpacing, Alignment.CenterHorizontally)
+                        horizontalArrangement = Arrangement.spacedBy(finalSpacing, Alignment.CenterHorizontally)
                     ) {
                         colOrder.forEach { col ->
                             Box(
                                 modifier = Modifier
-                                    .width(cellSize)
+                                    .width(finalColumnWidth)
                                     .fillMaxHeight(),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -509,6 +695,175 @@ private fun SweetSpotButton(active: Boolean, onClick: () -> Unit) {
     }
 }
 
+
+@Composable
+private fun QueueCard(
+    participants: List<FourWayPlayScreenModel.Participant>,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                "Queue",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+
+            // Display teams in queue - scrollable, shows 5 entries without scrolling
+            // Each entry is ~36dp (8dp padding * 2 + ~20dp text height), so 5 entries = ~180dp
+            Box(modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)) {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    if (participants.isEmpty()) {
+                        item {
+                            Text(
+                                "No teams in queue",
+                                fontSize = 11.sp,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+                    } else {
+                        items(participants.size) { index ->
+                            val participant = participants[index]
+                            val isCurrentTeam = index == 0
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                backgroundColor = if (isCurrentTeam) Color(0xFFE3F2FD) else Color.White,
+                                elevation = if (isCurrentTeam) 2.dp else 0.dp,
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                    horizontalArrangement = Arrangement.Start,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (isCurrentTeam) "▶ ${participant.handler} & ${participant.dog}"
+                                               else "${participant.handler} & ${participant.dog}",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isCurrentTeam) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isCurrentTeam) Color(0xFF1976D2) else Color.Black
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeamManagementCard(
+    onClearTeams: () -> Unit,
+    onImport: () -> Unit,
+    onAddTeam: () -> Unit,
+    onExport: () -> Unit,
+    onLog: () -> Unit,
+    onResetRound: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onClearTeams,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFF7B1FA2),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("CLEAR TEAMS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onImport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("IMPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onAddTeam,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("ADD TEAM", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onExport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("EXPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onLog,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("LOG", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Button(
+                onClick = onResetRound,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFFD50000),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("RESET ROUND", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+        }
+    }
+}
+
 @Composable
 private fun ControlRow(screenModel: FourWayPlayScreenModel) {
     Row(
@@ -541,56 +896,108 @@ private fun RowScope.ControlActionButton(
 
 @Composable
 private fun TimerCard(timerRunning: Boolean, modifier: Modifier = Modifier, onStartStop: () -> Unit) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(text = "Timer", style = MaterialTheme.typography.h6)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Top row: TIMER and PAUSE buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
-                    onClick = onStartStop,
-                    modifier = Modifier.weight(1f),
+                    onClick = { if (!timerRunning) onStartStop() },
+                    modifier = Modifier.weight(1f).height(50.dp),
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = if (timerRunning) FourWayPalette.warning else FourWayPalette.success,
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
                         contentColor = Color.White
-                    )
+                    ),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text(if (timerRunning) "Stop" else "Start 60s")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("▶", fontSize = 16.sp)
+                        Text("TIMER", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { if (timerRunning) onStartStop() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⏸", fontSize = 16.sp)
+                        Text("PAUSE", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
                 }
             }
+
+            // Bottom row: EDIT and RESET buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { /* Edit */ },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✎", fontSize = 16.sp)
+                        Text("EDIT", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { /* Reset */ },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("↻", fontSize = 16.sp)
+                        Text("RESET", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Time Remaining display
+            Text(
+                "Time Remaining: 0:33:25",
+                fontSize = 11.sp,
+                color = Color.Gray,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
         }
     }
 }
 
 @Composable
 private fun ParticipantQueueCard(participants: List<FourWayPlayScreenModel.Participant>, completedCount: Int, onAddTeam: () -> Unit) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Teams",
-                    style = MaterialTheme.typography.h6,
-                    modifier = Modifier.weight(1f)
-                )
-                Button(
-                    onClick = onAddTeam,
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    Text("Add Team")
-                }
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(text = "Remaining: ${participants.size}", style = MaterialTheme.typography.caption)
-            Text(text = "Completed: $completedCount", style = MaterialTheme.typography.caption)
-            Spacer(modifier = Modifier.height(8.dp))
-            Spacer(modifier = Modifier.heightIn(min = 8.dp))
-            LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                items(participants) { participant ->
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(text = "${participant.handler} & ${participant.dog}", fontWeight = FontWeight.Bold)
-                        Text(text = participant.utn, style = MaterialTheme.typography.caption)
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "On the Field:",
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp
+            )
+
+            // Show up to 4 teams with their display info
+            Column(modifier = Modifier.heightIn(max = 120.dp)) {
+                participants.take(4).forEachIndexed { index, participant ->
+                    Column(modifier = Modifier.padding(vertical = 2.dp)) {
+                        Text(
+                            text = "${index + 1}. ${participant.handler} & ${participant.dog}",
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = "   ${participant.utn}",
+                            fontSize = 10.sp,
+                            color = Color.Gray
+                        )
                     }
                 }
             }

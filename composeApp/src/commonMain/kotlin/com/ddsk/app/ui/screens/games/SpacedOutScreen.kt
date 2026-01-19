@@ -56,9 +56,7 @@ import com.ddsk.app.media.rememberAudioPlayer
 import com.ddsk.app.persistence.*
 import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
-import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.foundation.shape.RoundedCornerShape
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
@@ -68,12 +66,10 @@ object SpacedOutScreen : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        // Renaming to test cache and fixing potential syntax issues
-        val myModel = remember { SpacedOutScreenModel() }
-        val dataStore = com.ddsk.app.persistence.rememberDataStore()
-        LaunchedEffect(Unit) {
-            myModel.initPersistence(dataStore)
-        }
+        val myModel = rememberScreenModel { SpacedOutScreenModel() }
+        val dataStore = rememberDataStore()
+        LaunchedEffect(Unit) { myModel.initPersistence(dataStore) }
+
         val scoreState = myModel.score
         val score by scoreState.collectAsState()
         val spacedOutCount by myModel.spacedOutCount.collectAsState()
@@ -121,171 +117,118 @@ object SpacedOutScreen : Screen {
 
         val exporter = rememberFileExporter()
         val assetLoader = rememberAssetLoader()
-
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Spaced Out") })
 
-        LaunchedEffect(timerRunning) {
-            if (timerRunning) {
-                audioPlayer.play()
-            } else {
-                audioPlayer.stop()
-            }
-        }
+        LaunchedEffect(timerRunning) { if (timerRunning) audioPlayer.play() else audioPlayer.stop() }
 
         Surface(modifier = Modifier.fillMaxSize()) {
-            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                // Home button is rendered inside the header to avoid overlap.
+            Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                HeaderRow(
+                    onHome = { navigator.replaceAll(com.ddsk.app.ui.screens.MainScreen()) },
+                    activeName = activeParticipant?.displayName() ?: "No team loaded",
+                    score = score,
+                    timeLeft = timeLeft,
+                    timerRunning = timerRunning,
+                    onTimerToggle = { if (timerRunning) myModel.stopTimer() else myModel.startTimer() },
+                    onTimerReset = myModel::resetTimer,
+                    onResetRound = myModel::reset
+                )
 
-                Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    HeaderRow(
-                        navigator = navigator,
-                        activeName = activeParticipant?.displayName() ?: "No team loaded",
+                Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Sidebar(
+                        collapsed = sidebarCollapsed.value,
                         score = score,
-                        timeLeft = timeLeft,
-                        timerRunning = timerRunning,
-                        onTimerToggle = {
-                            if (timerRunning) myModel.stopTimer() else myModel.startTimer()
+                        spacedOut = spacedOutCount,
+                        sweetSpotBonusOn = sweetSpotBonusOn,
+                        allRollersOn = allRollersOn,
+                        onToggleCollapse = { sidebarCollapsed.value = !sidebarCollapsed.value },
+                        onSweetSpotToggle = myModel::toggleSweetSpotBonus,
+                        onAllRollersToggle = myModel::toggleAllRollers,
+                        onFlipField = myModel::flipField,
+                        onReset = myModel::reset,
+                        onAddTeam = { showAddParticipant = true },
+                        onImport = { filePicker.launch() },
+                        onExport = {
+                            val template = assetLoader.load("templates/UDC Spaced Out Data Entry L1 Div Sort.xlsx")
+                            if (template != null) {
+                                val bytes = myModel.exportParticipantsAsXlsx(template)
+                                val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                fun pad2(v: Int) = v.toString().padStart(2, '0')
+                                val dateStr = buildString {
+                                    append(now.year); append(pad2(now.monthNumber)); append(pad2(now.dayOfMonth)); append("_"); append(pad2(now.hour)); append(pad2(now.minute)); append(pad2(now.second))
+                                }
+                                exporter.save("SpacedOut_Scores_${dateStr}.xlsx", bytes)
+                            } else {
+                                exportBuffer = myModel.exportParticipantsAsCsv()
+                            }
                         },
-                        onTimerReset = myModel::resetTimer,
-                        onResetRound = myModel::reset
+                        onExportLog = { logBuffer = myModel.exportLog() },
+                        onNext = myModel::nextParticipant,
+                        onPrev = myModel::previousParticipant,
+                        onSkip = myModel::skipParticipant,
+                        onClearParticipants = myModel::clearParticipants
                     )
 
-                    Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Sidebar(
-                            collapsed = sidebarCollapsed.value,
-                            score = score,
-                            spacedOut = spacedOutCount,
-                            misses = misses,
-                            ob = ob,
-                            sweetSpotBonusOn = sweetSpotBonusOn,
-                            allRollersOn = allRollersOn,
-                            onToggleCollapse = { sidebarCollapsed.value = !sidebarCollapsed.value },
+                    ParticipantList(queue = queue)
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .verticalScroll(scrollState),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        TopStats(
+                            score,
+                            spacedOutCount,
+                            zonesCaught,
+                            misses,
+                            ob,
                             onMiss = myModel::incrementMisses,
                             onOb = myModel::incrementOb,
-                            onSweetSpotToggle = myModel::toggleSweetSpotBonus,
-                            onAllRollersToggle = myModel::toggleAllRollers,
-                            onFlipField = myModel::flipField,
-                            onReset = myModel::reset,
-                            onAddTeam = { showAddParticipant = true },
-                            onImport = { filePicker.launch() },
-                            onExport = {
-                                val template = assetLoader.load("templates/UDC Spaced Out Data Entry L1 Div Sort.xlsx")
-                                if (template != null) {
-                                    val bytes = myModel.exportParticipantsAsXlsx(template)
-
-                                    // React-style timestamp: YYYYMMDD_HHMMSS
-                                    val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-                                    fun pad2(v: Int) = v.toString().padStart(2, '0')
-                                    val dateStr = buildString {
-                                        append(now.year)
-                                        append(pad2(now.monthNumber))
-                                        append(pad2(now.dayOfMonth))
-                                        append("_")
-                                        append(pad2(now.hour))
-                                        append(pad2(now.minute))
-                                        append(pad2(now.second))
-                                    }
-
-                                    exporter.save("SpacedOut_Scores_${dateStr}.xlsx", bytes)
-                                } else {
-                                    // Fall back to CSV export content for visibility
-                                    exportBuffer = myModel.exportParticipantsAsCsv()
-                                }
-                            },
-                            onExportLog = { logBuffer = myModel.exportLog() },
                             onNext = myModel::nextParticipant,
-                            onPrev = myModel::previousParticipant,
-                            onSkip = myModel::skipParticipant,
-                            onClearParticipants = myModel::clearParticipants
+                            onSkip = myModel::skipParticipant
                         )
-
-                        ParticipantList(queue = queue)
-
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .verticalScroll(scrollState),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            TopStats(
-                                score,
-                                spacedOutCount,
-                                zonesCaught,
-                                misses,
-                                ob,
-                                onMiss = myModel::incrementMisses,
-                                onOb = myModel::incrementOb,
-                                onNext = myModel::nextParticipant,
-                                onSkip = myModel::skipParticipant
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            ScoringGrid(fieldFlipped, clickedZones, myModel)
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                SweetSpotBonusButton(
-                                    bonusOn = sweetSpotBonusOn,
-                                    onToggle = myModel::toggleSweetSpotBonus,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                AllRollersButton(
-                                    enabled = allRollersOn,
-                                    onToggle = myModel::toggleAllRollers,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        ScoringGrid(fieldFlipped, clickedZones, myModel)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            SweetSpotBonusButton(modifier = Modifier.weight(1f), bonusOn = sweetSpotBonusOn, onToggle = myModel::toggleSweetSpotBonus)
+                            AllRollersButton(enabled = allRollersOn, onToggle = myModel::toggleAllRollers, modifier = Modifier.weight(1f))
                         }
                     }
-
-                    LogCard(logEntries = logEntries)
                 }
+
+                LogCard(logEntries = logEntries)
+
+                LaunchedEffect(sidebarCollapsed.value) { scope.launch { scrollState.animateScrollTo(0) } }
+
+                if (showAddParticipant) {
+                    ParticipantDialog(
+                        handler = handlerInput,
+                        dog = dogInput,
+                        utn = utnInput,
+                        onHandlerChange = { handlerInput = it },
+                        onDogChange = { dogInput = it },
+                        onUtnChange = { utnInput = it },
+                        onDismiss = { showAddParticipant = false },
+                        onConfirm = {
+                            myModel.addParticipant(handlerInput, dogInput, utnInput)
+                            handlerInput = ""; dogInput = ""; utnInput = ""; showAddParticipant = false
+                        }
+                    )
+                }
+
+                exportBuffer?.let { payload -> TextPreviewDialog(title = "Export Participants", text = payload, onDismiss = { exportBuffer = null }) }
+                logBuffer?.let { payload -> TextPreviewDialog(title = "Run Log", text = payload, onDismiss = { logBuffer = null }) }
             }
-        }
-
-        LaunchedEffect(sidebarCollapsed.value) {
-            scope.launch { scrollState.animateScrollTo(0) }
-        }
-
-        if (showAddParticipant) {
-            ParticipantDialog(
-                handler = handlerInput,
-                dog = dogInput,
-                utn = utnInput,
-                onHandlerChange = { handlerInput = it },
-                onDogChange = { dogInput = it },
-                onUtnChange = { utnInput = it },
-                onDismiss = { showAddParticipant = false },
-                onConfirm = {
-                    myModel.addParticipant(handlerInput, dogInput, utnInput)
-                    handlerInput = ""
-                    dogInput = ""
-                    utnInput = ""
-                    showAddParticipant = false
-                }
-            )
-        }
-
-        exportBuffer?.let { payload ->
-            TextPreviewDialog(
-                title = "Export Participants",
-                text = payload,
-                onDismiss = { exportBuffer = null }
-            )
-        }
-
-        logBuffer?.let { payload ->
-            TextPreviewDialog(
-                title = "Run Log",
-                text = payload,
-                onDismiss = { logBuffer = null }
-            )
         }
     }
 }
 
 @Composable
 private fun HeaderRow(
-    navigator: cafe.adriel.voyager.navigator.Navigator,
+    onHome: () -> Unit,
     activeName: String,
     score: Int,
     timeLeft: Int,
@@ -300,15 +243,11 @@ private fun HeaderRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            GameHomeButton(navigator = navigator)
-
-            Button(
-                onClick = onTimerToggle,
-                colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) Color(0xFFFFB74D) else Color(0xFF2196F3))
-            ) {
+            IconButton(onClick = onHome) { Icon(imageVector = Icons.Filled.Menu, contentDescription = "Home") }
+            Button(onClick = onTimerToggle, colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) Color(0xFFFFB74D) else Color(0xFF2196F3))) {
                 Text(if (timerRunning) "${timeLeft}s" else "Start Timer", color = Color.White)
             }
-            Button(onClick = onTimerReset, enabled = timerRunning.not()) { Text("Reset Timer") }
+            Button(onClick = onTimerReset, enabled = !timerRunning) { Text("Reset Timer") }
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = activeName, fontWeight = FontWeight.Bold)
                 Text(text = "Score: $score", color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f))
@@ -397,13 +336,9 @@ private fun Sidebar(
     collapsed: Boolean,
     score: Int,
     spacedOut: Int,
-    misses: Int,
-    ob: Int,
     sweetSpotBonusOn: Boolean,
     allRollersOn: Boolean,
     onToggleCollapse: () -> Unit,
-    onMiss: () -> Unit,
-    onOb: () -> Unit,
     onSweetSpotToggle: () -> Unit,
     onAllRollersToggle: () -> Unit,
     onFlipField: () -> Unit,
@@ -469,9 +404,9 @@ private fun Sidebar(
 @Composable
 private fun SidebarButton(
     label: String,
+    modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colors.primary,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    onClick: () -> Unit
 ) {
     Button(
         onClick = onClick,
@@ -688,7 +623,7 @@ private fun ScoringGrid(
 }
 
 @Composable
-private fun SweetSpotBonusButton(bonusOn: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+private fun SweetSpotBonusButton(modifier: Modifier = Modifier, bonusOn: Boolean, onToggle: () -> Unit) {
     Button(
         onClick = onToggle,
         colors = ButtonDefaults.buttonColors(
