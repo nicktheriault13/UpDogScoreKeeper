@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.Card
@@ -91,13 +93,17 @@ object TimeWarpScreen : Screen {
         val pendingJsonExport by screenModel.pendingJsonExport.collectAsState()
 
         var showAddParticipant by remember { mutableStateOf(false) }
+        var showClearTeamsDialog by remember { mutableStateOf(false) }
+        var showResetRoundDialog by remember { mutableStateOf(false) }
         var showTeams by remember { mutableStateOf(false) }
-        var showHelp by remember { mutableStateOf(false) }
+        // TODO: Add back for future iteration
+        // var showHelp by remember { mutableStateOf(false) }
         var showTimeInput by remember { mutableStateOf(false) }
 
         // Import / Export
         val assetLoader = rememberAssetLoader()
         val exporter = rememberFileExporter()
+        val scope = rememberCoroutineScope()
         var showImportChoice by remember { mutableStateOf(false) }
         var pendingImport by remember { mutableStateOf<ImportResult?>(null) }
 
@@ -123,115 +129,183 @@ object TimeWarpScreen : Screen {
         var dog by remember { mutableStateOf("") }
         var utn by remember { mutableStateOf("") }
 
-        Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Home button is rendered inside the score header to avoid overlap.
-
+        Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Top row: Header card and Timer
                 Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Left column: give it a fixed width and let it scroll/grow vertically.
+                    // Left: Header card with stats and score
+                    TimeWarpHeaderCard(
+                        navigator = navigator,
+                        score = score,
+                        misses = misses,
+                        ob = ob,
+                        activeParticipant = activeParticipant,
+                        canUndo = canUndo,
+                        onUndo = { screenModel.undoLastAction() },
+                        onMiss = { screenModel.incrementMisses() },
+                        onOb = { screenModel.incrementOb() },
+                        onShowTeams = { showTeams = true },
+                        allRollersClicked = allRollersClicked,
+                        onAllRollersClick = { screenModel.toggleAllRollers() },
+                        timeRemaining = timeRemaining,
+                        isTimerRunning = isTimerRunning,
+                        onStartStopCountdown = {
+                            if (isTimerRunning) screenModel.stopCountdownAndAddScore() else screenModel.startCountdown()
+                        },
+                        onLongPressStart = { showTimeInput = true },
+                        modifier = Modifier.weight(2f).fillMaxHeight()
+                    )
+
+                    // Right: Timer card
+                    TimeWarpTimerCard(
+                        isAudioTimerPlaying = isAudioTimerPlaying,
+                        onTimerAudioToggle = screenModel::toggleAudioTimer,
+                        modifier = Modifier.weight(1f).fillMaxHeight()
+                    )
+                }
+
+                // Middle row: Main game grid and Team Management
+                Row(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Main grid (center)
+                    FieldGrid(
+                        clickedZones = clickedZones,
+                        fieldFlipped = fieldFlipped,
+                        onZoneClick = { screenModel.handleZoneClick(it) },
+                        sweetSpotClicked = sweetSpotClicked,
+                        onSweetSpotClick = { screenModel.handleSweetSpotClick() },
+                        allRollersClicked = allRollersClicked,
+                        onAllRollersClick = { screenModel.toggleAllRollers() },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Right side: Queue and Team Management
                     Column(
-                        modifier = Modifier.width(760.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        modifier = Modifier.weight(0.3f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        ScoreHeader(
-                            navigator = navigator,
-                            score = score,
-                            misses = misses,
-                            ob = ob,
-                            timer = timeRemaining,
-                            isTimerRunning = isTimerRunning,
-                            isAudioTimerPlaying = isAudioTimerPlaying,
-                            onTimerAudioToggle = screenModel::toggleAudioTimer,
-                            onStartStopCountdown = {
-                                if (isTimerRunning) screenModel.stopCountdownAndAddScore() else screenModel.startCountdown()
+                        // Queue card showing teams in queue
+                        TimeWarpQueueCard(
+                            active = activeParticipant,
+                            queue = participantQueue,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // Team Management section
+                        TimeWarpTeamManagementCard(
+                            onClearTeams = { showClearTeamsDialog = true },
+                            onImport = { filePicker.launch() },
+                            onAddTeam = { showAddParticipant = true },
+                            onExport = {
+                                val template = assetLoader.load("templates/UDC TimeWarp Data Entry L1 or L2 Div Sort.xlsx")
+                                if (template != null) {
+                                    val all = buildList {
+                                        activeParticipant?.let { add(it) }
+                                        addAll(participantQueue)
+                                        addAll(completedParticipants)
+                                    }
+                                    val bytes = generateTimeWarpXlsx(all, template)
+                                    exporter.save("TimeWarp_Scores.xlsx", bytes)
+                                }
                             },
-                            canUndo = canUndo,
-                            onUndo = { screenModel.undoLastAction() },
-                            onMiss = { screenModel.incrementMisses() },
-                            onOb = { screenModel.incrementOb() },
-                            activeParticipant = activeParticipant,
-                            onShowTeams = { showTeams = true },
-                            onLongPressStart = { showTimeInput = true }
-                        )
-
-                        FieldGrid(
-                            clickedZones = clickedZones,
-                            fieldFlipped = fieldFlipped,
-                            onZoneClick = { screenModel.handleZoneClick(it) }
-                        )
-
-                        BottomControls(
-                            onPrevious = { /* Optional: not implemented */ },
-                            onNext = { screenModel.nextParticipant() },
-                            onSkip = { screenModel.skipParticipant() },
-                            onShowTeams = { showTeams = true },
-                            onAllRollers = { screenModel.toggleAllRollers() },
-                            allRollersActive = allRollersClicked
+                            onLog = { /* LOG */ },
+                            // TODO: Add back for future iteration
+                            // onHelp = { showHelp = true },
+                            onResetRound = { showResetRoundDialog = true },
+                            modifier = Modifier.weight(1f)
                         )
                     }
+                }
 
-                    // Right column: fixed width actions/stats panel
-                    Column(
-                        modifier = Modifier.width(320.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                // Bottom row: Navigation buttons aligned below the grid
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Navigation buttons below the scoring grid
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        QueueCard(
-                            active = activeParticipant,
-                            queue = participantQueue
-                        )
-
-                        Card(elevation = 6.dp, backgroundColor = Palette.surface, shape = RoundedCornerShape(16.dp)) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                        Button(
+                            onClick = { screenModel.flipField() },
+                            colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Actions", color = Palette.onSurfaceVariant, fontSize = 12.sp)
+                                Text("↕ FLIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
 
-                                // 2-column layout
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                    ActionButton2Col(text = "Import", onClick = { filePicker.launch() })
-                                    ActionButton2Col(
-                                        text = "Export",
-                                        onClick = {
-                                            val template = assetLoader.load("templates/UDC TimeWarp Data Entry L1 or L2 Div Sort.xlsx")
-                                            if (template != null) {
-                                                val all = buildList {
-                                                    activeParticipant?.let { add(it) }
-                                                    addAll(participantQueue)
-                                                    addAll(completedParticipants)
-                                                }
-                                                val bytes = generateTimeWarpXlsx(all, template)
-                                                exporter.save("TimeWarp_Scores.xlsx", bytes)
-                                            }
-                                        }
-                                    )
-                                }
+                        Button(
+                            onClick = { /* Previous */ },
+                            colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("◄◄ PREV", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                    ActionButton2Col(text = "Add Team", onClick = { showAddParticipant = true })
-                                    ActionButton2Col(text = "Help", onClick = { showHelp = true })
-                                }
+                        Button(
+                            onClick = { screenModel.nextParticipant() },
+                            colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("► NEXT", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                    ActionButton2Col(
-                                        text = if (sweetSpotClicked) "Sweet Spot (On)" else "Sweet Spot",
-                                        onClick = { screenModel.handleSweetSpotClick() }
-                                    )
-                                    ActionButton2Col(text = "Flip Field", onClick = { screenModel.flipField() })
-                                }
-
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                    ActionButton2Col(text = "Reset", onClick = { screenModel.reset() })
-                                    ActionButton2Col(text = if (allRollersClicked) "All Rollers (On)" else "All Rollers", onClick = { screenModel.toggleAllRollers() })
-                                }
+                        Button(
+                            onClick = { screenModel.skipParticipant() },
+                            colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("►► SKIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
                         }
                     }
+
+                    // Empty spacer to align with right column
+                    Spacer(modifier = Modifier.weight(0.3f))
                 }
             }
         }
@@ -291,6 +365,61 @@ object TimeWarpScreen : Screen {
             )
         }
 
+        if (showClearTeamsDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearTeamsDialog = false },
+                title = { Text("Clear All Teams?") },
+                text = { Text("Are you sure you want to clear all teams? This action cannot be undone.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            // Call clear teams function when implemented
+                            // screenModel.clearParticipants()
+                            showClearTeamsDialog = false
+                        },
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Clear")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showClearTeamsDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showResetRoundDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetRoundDialog = false },
+                title = { Text("Reset Round?") },
+                text = { Text("Are you sure you want to reset the current round? All scores will be lost. This action cannot be undone.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            screenModel.reset()
+                            showResetRoundDialog = false
+                        },
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Reset")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showResetRoundDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
         if (showAddParticipant) {
             AlertDialog(
                 onDismissRequest = { showAddParticipant = false },
@@ -342,13 +471,457 @@ object TimeWarpScreen : Screen {
             )
         }
 
-        if (showHelp) {
-            AlertDialog(
-                onDismissRequest = { showHelp = false },
-                confirmButton = { Button(onClick = { showHelp = false }) { Text("Close") } },
-                title = { Text("TimeWarp — Help") },
-                text = { Text("- Timer: plays the 60s timer audio.\n- Export: exports participants.\n- Add Team: opens add participant modal.\n- Reset Score: resets scoring and stops timers.\n- Flip Field: toggles field orientation.\n- Zone buttons: mark zones as clicked and update score.\n- Sweet Spot: toggles sweet spot bonus.") }
+        // TODO: Add back help dialog in future iteration
+        // if (showHelp) {
+        //     AlertDialog(
+        //         onDismissRequest = { showHelp = false },
+        //         confirmButton = { Button(onClick = { showHelp = false }) { Text("Close") } },
+        //         title = { Text("TimeWarp — Help") },
+        //         text = { Text("- Timer: plays the 60s timer audio.\n- Export: exports participants.\n- Add Team: opens add participant modal.\n- Reset Score: resets scoring and stops timers.\n- Flip Field: toggles field orientation.\n- Zone buttons: mark zones as clicked and update score.\n- Sweet Spot: toggles sweet spot bonus.") }
+        //     )
+        // }
+    }
+}
+
+@Composable
+private fun TimeWarpHeaderCard(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
+    score: Int,
+    misses: Int,
+    ob: Int,
+    activeParticipant: TimeWarpParticipant?,
+    canUndo: Boolean,
+    onUndo: () -> Unit,
+    onMiss: () -> Unit,
+    onOb: () -> Unit,
+    onShowTeams: () -> Unit,
+    allRollersClicked: Boolean,
+    onAllRollersClick: () -> Unit,
+    timeRemaining: Float,
+    isTimerRunning: Boolean,
+    onStartStopCountdown: () -> Unit,
+    onLongPressStart: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().fillMaxHeight().padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Column 1: Title, UNDO button, and TIME WARP COMPLETED button
+            Column(
+                modifier = Modifier.weight(0.7f).fillMaxHeight(),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GameHomeButton(navigator = navigator)
+                        Text(
+                            text = "Time Warp",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = activeParticipant?.displayName ?: "No active team",
+                        fontSize = 13.sp,
+                        color = Color.DarkGray,
+                        modifier = Modifier.clickable { onShowTeams() }
+                    )
+                }
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Button(
+                        onClick = { /* Time Warp Completed */ },
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFF6750A4),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.width(140.dp).height(38.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("TIME WARP\nCOMPLETED", fontWeight = FontWeight.Bold, fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp)
+                    }
+
+                    Button(
+                        onClick = onUndo,
+                        enabled = canUndo,
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.width(140.dp).height(38.dp)
+                    ) {
+                        Text("UNDO", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            }
+
+            // Column 2: MISS and OB buttons at bottom
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.Bottom
+            ) {
+                // MISS and OB buttons at bottom in same row
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Miss button (red background)
+                    Button(
+                        onClick = onMiss,
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("MISS", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("$misses", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+
+                    // OB button
+                    Button(
+                        onClick = onOb,
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFFF8A50),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("OB", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("$ob", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+
+            // Column 3: Score display, START button, Time display, and All Rollers button
+            Column(
+                modifier = Modifier.weight(0.8f).fillMaxHeight(),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(horizontalAlignment = Alignment.End) {
+                    // Score on one line
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text("Score: ", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = score.toString(),
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
+                }
+
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Start/Stop button
+                    Card(
+                        backgroundColor = if (isTimerRunning) Color(0xFFD50000) else Color(0xFF6750A4),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(38.dp)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onTap = { onStartStopCountdown() },
+                                    onLongPress = { onLongPressStart() }
+                                )
+                            }
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(8.dp)
+                        ) {
+                            Text(
+                                if (isTimerRunning) "STOP" else "START",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    // Time Remaining display
+                    Text(
+                        "Time: ${formatHundredths(timeRemaining)}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+
+                    // All Rollers button
+                    Button(
+                        onClick = onAllRollersClick,
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = if (allRollersClicked) Color(0xFF00C853) else Color(0xFF9E9E9E),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("ALL ROLLERS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeWarpTimerCard(
+    isAudioTimerPlaying: Boolean,
+    onTimerAudioToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Button(
+                onClick = onTimerAudioToggle,
+                modifier = Modifier.fillMaxWidth().height(80.dp),
+                colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                    backgroundColor = if (isAudioTimerPlaying) Color(0xFFFF9800) else Color(0xFF00BCD4),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("♪", fontSize = 32.sp)
+                    Text("AUDIO TIMER", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(
+                        if (isAudioTimerPlaying) "ON" else "OFF",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeWarpQueueCard(
+    active: TimeWarpParticipant?,
+    queue: List<TimeWarpParticipant>,
+    modifier: Modifier = Modifier
+) {
+    // Show all teams that do NOT have scoring data attached.
+    val pendingTeams = buildList {
+        if (active?.result == null) {
+            active?.let { add(it) }
+        }
+        addAll(queue.filter { it.result == null })
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth().fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                "Queue",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(bottom = 4.dp)
             )
+
+            // Display teams in queue - scrollable list that fills available space
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (pendingTeams.isEmpty()) {
+                    item {
+                        Text(
+                            "No teams in queue",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                } else {
+                    items(count = pendingTeams.size) { index ->
+                        val participant = pendingTeams[index]
+                        val isCurrentTeam = index == 0 && active == participant
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = if (isCurrentTeam) Color(0xFFE3F2FD) else Color.White,
+                            elevation = if (isCurrentTeam) 2.dp else 0.dp,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                horizontalArrangement = Arrangement.Start,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (isCurrentTeam) "▶ ${participant.displayName}"
+                                           else "${participant.displayName}",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isCurrentTeam) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isCurrentTeam) Color(0xFF1976D2) else Color.Black
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeWarpTeamManagementCard(
+    onClearTeams: () -> Unit,
+    onImport: () -> Unit,
+    onAddTeam: () -> Unit,
+    onExport: () -> Unit,
+    onLog: () -> Unit,
+    // TODO: Add back for future iteration
+    // onHelp: () -> Unit,
+    onResetRound: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // Scrollable content
+            Column(
+                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onClearTeams,
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
+                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("CLEAR TEAMS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = onImport,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFF7B1FA2),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("IMPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+
+                    Button(
+                        onClick = onAddTeam,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFF7B1FA2),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("ADD TEAM", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = onExport,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFF7B1FA2),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("EXPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+
+                    Button(
+                        onClick = onLog,
+                        modifier = Modifier.weight(1f).height(42.dp),
+                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFF7B1FA2),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("LOG", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+
+                // TODO: Add HELP button in future iteration
+                // Button(
+                //     onClick = onHelp,
+                //     modifier = Modifier.fillMaxWidth().height(42.dp),
+                //     colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                //         backgroundColor = Color(0xFF7B1FA2),
+                //         contentColor = Color.White
+                //     ),
+                //     shape = RoundedCornerShape(8.dp)
+                // ) {
+                //     Text("HELP", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                // }
+            }
+
+            // Fixed RESET ROUND button at bottom
+            Button(
+                onClick = onResetRound,
+                modifier = Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 12.dp, vertical = 6.dp),
+                colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFFD50000),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("RESET ROUND", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
         }
     }
 }
@@ -518,32 +1091,34 @@ private fun ScoreBox(label: String, value: String, modifier: Modifier = Modifier
 private fun FieldGrid(
     clickedZones: Set<Int>,
     fieldFlipped: Boolean,
-    onZoneClick: (Int) -> Unit
+    onZoneClick: (Int) -> Unit,
+    sweetSpotClicked: Boolean,
+    onSweetSpotClick: () -> Unit,
+    allRollersClicked: Boolean,
+    onAllRollersClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     // 3 rows x 5 cols; middle row taller. Zones: 1 (col0 all rows), 2 (col1 all rows), 3 (col2 middle row)
     val rows = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
     val cols = if (fieldFlipped) listOf(4, 3, 2, 1, 0) else listOf(0, 1, 2, 3, 4)
 
     Card(
-        elevation = 6.dp,
-        backgroundColor = Palette.surfaceContainer,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(300.dp)
+        elevation = 8.dp,
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier.fillMaxSize()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             rows.forEach { r ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(if (r == 1) 2f else 1f),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     cols.forEach { c ->
                         val zoneNumber = when {
@@ -553,32 +1128,67 @@ private fun FieldGrid(
                             else -> null
                         }
 
-                        val clicked = zoneNumber != null && clickedZones.contains(zoneNumber)
-                        val bg = when {
-                            zoneNumber == null -> Palette.surface
-                            clicked -> Palette.success
-                            else -> Palette.tertiary
-                        }
-                        val fg = if (clicked) Palette.onSuccess else Palette.onTertiary
+                        // Special buttons in columns 3 and 4
+                        when {
+                            c == 3 && r == 1 -> {
+                                // Sweet Spot button
+                                Button(
+                                    onClick = onSweetSpotClick,
+                                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                                        backgroundColor = if (sweetSpotClicked) Color(0xFF00C853) else Color(0xFF9E9E9E),
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Sweet\nSpot", fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = TextAlign.Center)
+                                }
+                            }
+                            c == 4 && r == 1 -> {
+                                // All Rollers button
+                                Button(
+                                    onClick = onAllRollersClick,
+                                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                                        backgroundColor = if (allRollersClicked) Color(0xFF00C853) else Color(0xFF9E9E9E),
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("All\nRollers", fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = TextAlign.Center)
+                                }
+                            }
+                            zoneNumber != null -> {
+                                // Zone button
+                                val clicked = clickedZones.contains(zoneNumber)
+                                val bg = if (clicked) Color(0xFF00C853) else Color(0xFF9E9E9E)
 
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .background(bg, RoundedCornerShape(12.dp))
-                                .clickable(enabled = zoneNumber != null) {
-                                    zoneNumber?.let(onZoneClick)
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (zoneNumber != null) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Button(
+                                    onClick = { onZoneClick(zoneNumber) },
+                                    enabled = !clicked,
+                                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                                        backgroundColor = bg,
+                                        contentColor = Color.White,
+                                        disabledBackgroundColor = bg,
+                                        disabledContentColor = Color.White
+                                    ),
+                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
                                     Text(
-                                        text = "Zone $zoneNumber",
-                                        color = fg,
-                                        fontWeight = FontWeight.Bold
+                                        text = "$zoneNumber",
+                                        fontSize = 32.sp,
+                                        fontWeight = FontWeight.Black
                                     )
                                 }
+                            }
+                            else -> {
+                                // Empty space
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                )
                             }
                         }
                     }
