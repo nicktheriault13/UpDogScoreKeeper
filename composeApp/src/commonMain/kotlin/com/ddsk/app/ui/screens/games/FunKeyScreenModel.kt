@@ -186,10 +186,17 @@ class FunKeyScreenModel : ScreenModel {
             else -> 0 to state
         }
 
+        // Add the current key to activated keys
+        val newActivatedKeys = updated.activatedKeys + zone
+
+        // Check if all 4 keys are now activated - if so, reset them all
+        val allKeysActivated = newActivatedKeys.containsAll(setOf("KEY1", "KEY2", "KEY3", "KEY4"))
+        val finalActivatedKeys = if (allKeysActivated) emptySet() else newActivatedKeys
+
         // Phase transition: blue -> purple after a key
         return updated.copy(
             score = updated.score + points,
-            activatedKeys = updated.activatedKeys + zone,
+            activatedKeys = finalActivatedKeys,
             isBlueEnabled = false,
             isPurpleEnabled = true
         )
@@ -228,6 +235,30 @@ class FunKeyScreenModel : ScreenModel {
             it.copy(
                 score = 0,
                 misses = 0,
+                sweetSpotOn = false,
+                activatedKeys = emptySet(),
+                isPurpleEnabled = true,
+                isBlueEnabled = false,
+                jump1Count = 0,
+                jump2Count = 0,
+                jump3Count = 0,
+                jump2bCount = 0,
+                jump3bCount = 0,
+                tunnelCount = 0,
+                key1Count = 0,
+                key2Count = 0,
+                key3Count = 0,
+                key4Count = 0
+            )
+        }
+        persistState()
+    }
+
+    fun undo() {
+        // Simple undo: reset the current round state but keep participants
+        _uiState.update {
+            it.copy(
+                score = 0,
                 sweetSpotOn = false,
                 activatedKeys = emptySet(),
                 isPurpleEnabled = true,

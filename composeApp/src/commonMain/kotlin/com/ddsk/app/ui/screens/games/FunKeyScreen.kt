@@ -2,9 +2,8 @@ package com.ddsk.app.ui.screens.games
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -12,17 +11,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Card
-import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
@@ -39,7 +33,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.model.rememberScreenModel
@@ -52,49 +45,11 @@ import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
 
-// Shared Color Palettes
-private val mdPrimary = Color(0xFF6750A4)
-private val mdOnPrimary = Color(0xFFFFFFFF)
-private val mdPrimaryContainer = Color(0xFFEADDFF)
-private val mdOnPrimaryContainer = Color(0xFF21005D)
-private val mdSecondary = Color(0xFF625B71)
-private val mdOnSecondary = Color(0xFFFFFFFF)
-private val mdSecondaryContainer = Color(0xFFE8DEF8)
-private val mdOnSecondaryContainer = Color(0xFF1D192B)
-private val mdTertiary = Color(0xFF7D5260)
-private val mdOnTertiary = Color(0xFFFFFFFF)
-private val mdTertiaryContainer = Color(0xFFFFD8E4)
-private val mdOnTertiaryContainer = Color(0xFF31111D)
-private val mdError = Color(0xFFB3261E)
-private val mdOnError = Color(0xFFFFFFFF)
-private val mdErrorContainer = Color(0xFFF9DEDC)
-private val mdOnErrorContainer = Color(0xFF410E0B)
-private val mdBackground = Color(0xFFFFFBFE)
-private val mdOnBackground = Color(0xFF1C1B1F)
-private val mdSurface = Color(0xFFFFFBFE)
-private val mdOnSurface = Color(0xFF1C1B1F)
-private val mdSurfaceVariant = Color(0xFFE7E0EC)
-private val mdOnSurfaceVariant = Color(0xFF49454F)
-private val mdSurfaceContainer = Color(0xFFF5EFF7)
-private val mdOutline = Color(0xFF79747E)
-private val mdOutlineVariant = Color(0xFFCAC4D0)
-private val mdInverseSurface = Color(0xFF313033)
-private val mdInverseOnSurface = Color(0xFFF4EFF4)
-private val mdInversePrimary = Color(0xFFD0BCFF)
-private val mdText = Color(0xFF1C1B1F)
-
+// Color Palette
 private val vPrimary = Color(0xFF2979FF)
 private val vPrimaryOn = Color(0xFFFFFFFF)
 private val vSuccess = Color(0xFF00C853)
 private val vSuccessOn = Color(0xFFFFFFFF)
-private val vWarning = Color(0xFFFF9100)
-private val vWarningOn = Color(0xFFFFFFFF)
-private val vError = Color(0xFFD50000)
-private val vErrorOn = Color(0xFFFFFFFF)
-private val vInfo = Color(0xFF00B8D4)
-private val vInfoOn = Color(0xFFFFFFFF)
-private val vTertiary = Color(0xFFF500A1)
-private val vTertiaryOn = Color(0xFFFFFFFF)
 
 object FunKeyScreen : Screen {
     @Composable
@@ -106,7 +61,6 @@ object FunKeyScreen : Screen {
             screenModel.initPersistence(dataStore)
         }
         val score by screenModel.score.collectAsState()
-        val misses by screenModel.misses.collectAsState()
         val sweetSpotOn by screenModel.sweetSpotOn.collectAsState()
         val isPurpleEnabled by screenModel.isPurpleEnabled.collectAsState()
         val isBlueEnabled by screenModel.isBlueEnabled.collectAsState()
@@ -126,6 +80,9 @@ object FunKeyScreen : Screen {
 
         var isTimerRunning by remember { mutableStateOf(false) }
         var showAddDialog by remember { mutableStateOf(false) }
+        var showClearTeamsDialog by remember { mutableStateOf(false) }
+        var showResetRoundDialog by remember { mutableStateOf(false) }
+        var isFlipped by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Fun Key") })
@@ -144,112 +101,169 @@ object FunKeyScreen : Screen {
             if (isTimerRunning) audioPlayer.play() else audioPlayer.stop()
         }
 
-        Surface(modifier = Modifier.fillMaxSize()) {
-            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                // Home button is rendered inside the top score card (see FunKeyTopBar) to avoid overlap.
-
-                val isCompactHeight = maxHeight < 720.dp
-                val contentSpacing = if (isCompactHeight) 12.dp else 16.dp
-                val queueWeight = if (isCompactHeight) 0.28f else 0.24f
-                val fieldWeight = if (isCompactHeight) 0.52f else 0.6f
-                val actionWeight = 1f - queueWeight - fieldWeight
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(contentSpacing)
+        Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Top row: Header card and Timer
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    FunKeyTopBar(
+                    // Left: Header card with stats and score
+                    FunKeyHeaderCard(
                         navigator = navigator,
-                        isTimerRunning = isTimerRunning,
-                        score = score,
-                        misses = misses,
                         activeParticipant = activeParticipant,
-                        onTimerToggle = { isTimerRunning = !isTimerRunning },
-                        onAddTeam = { showAddDialog = true }
+                        score = score,
+                        obstaclesCount = jump1Count + jump2Count + jump3Count + jump2bCount + jump3bCount + tunnelCount,
+                        catchesCount = key1Count + key2Count + key3Count + key4Count,
+                        onUndo = screenModel::undo,
+                        modifier = Modifier.weight(2f).fillMaxHeight()
                     )
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(contentSpacing)
+
+                    // Right: Timer card
+                    FunKeyTimerCard(
+                        timerRunning = isTimerRunning,
+                        onStartStop = { isTimerRunning = !isTimerRunning },
+                        modifier = Modifier.weight(1f).fillMaxWidth()
+                    )
+                }
+
+                // Middle row: Main game grid and Team Management
+                Row(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Main grid (center)
+                    FunKeyFieldCard(
+                        isPurpleEnabled = isPurpleEnabled,
+                        isBlueEnabled = isBlueEnabled,
+                        sweetSpotOn = sweetSpotOn,
+                        jump3Count = jump3Count,
+                        jump1Count = jump1Count,
+                        jump3bCount = jump3bCount,
+                        jump2Count = jump2Count,
+                        jump2bCount = jump2bCount,
+                        tunnelCount = tunnelCount,
+                        key1Count = key1Count,
+                        key2Count = key2Count,
+                        key3Count = key3Count,
+                        key4Count = key4Count,
+                        activatedKeys = activatedKeys,
+                        onJump = { _, zone -> screenModel.handleCatch(FunKeyZoneType.JUMP, 0, zone) },
+                        onKey = { _, zone -> screenModel.handleCatch(FunKeyZoneType.KEY, 0, zone) },
+                        onSweetSpot = screenModel::toggleSweetSpot,
+                        isFlipped = isFlipped,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Right side: Queue and Team Management
+                    Column(
+                        modifier = Modifier.weight(0.3f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        FunKeySidebar(
-                            modifier = Modifier
-                                .widthIn(max = 260.dp)
-                                .fillMaxHeight(),
+                        // Queue card showing teams in queue
+                        FunKeyQueueCard(
+                            participants = participantQueue,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // Team Management section
+                        FunKeyTeamManagementCard(
+                            onClearTeams = { showClearTeamsDialog = true },
                             onImport = { filePicker.launch() },
+                            onAddTeam = { showAddDialog = true },
                             onExport = {
                                 exportParticipants(fileExporter, activeParticipant, participantQueue)
                             },
-                            onAddTeam = { showAddDialog = true },
-                            onNext = screenModel::nextParticipant,
-                            onSkip = screenModel::skipParticipant,
-                            onResetScore = screenModel::reset,
-                            onClearState = { screenModel.reset() }
+                            onResetRound = { showResetRoundDialog = true },
+                            modifier = Modifier.weight(1f)
                         )
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            verticalArrangement = Arrangement.spacedBy(contentSpacing)
+                    }
+                }
+
+                // Bottom row: Navigation buttons aligned below the grid
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Navigation buttons below the scoring grid
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { /* Previous participant logic */ },
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(queueWeight)
-                                    .fillMaxWidth(),
-                                contentAlignment = Alignment.TopCenter
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                ParticipantQueueCard(
-                                    activeParticipant = activeParticipant,
-                                    participantQueue = participantQueue,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                                Text("◄ PREV", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
-                            Box(
-                                modifier = Modifier
-                                    .weight(fieldWeight)
-                                    .fillMaxWidth(),
-                                contentAlignment = Alignment.TopCenter
+                        }
+
+                        Button(
+                            onClick = screenModel::nextParticipant,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                FunKeyFieldCard(
-                                    isPurpleEnabled = isPurpleEnabled,
-                                    isBlueEnabled = isBlueEnabled,
-                                    sweetSpotOn = sweetSpotOn,
-                                    jump3Count = jump3Count,
-                                    jump1Count = jump1Count,
-                                    jump3bCount = jump3bCount,
-                                    jump2Count = jump2Count,
-                                    jump2bCount = jump2bCount,
-                                    tunnelCount = tunnelCount,
-                                    key1Count = key1Count,
-                                    key2Count = key2Count,
-                                    key3Count = key3Count,
-                                    key4Count = key4Count,
-                                    activatedKeys = activatedKeys,
-                                    onJump = { _, zone -> screenModel.handleCatch(FunKeyZoneType.JUMP, 0, zone) },
-                                    onKey = { _, zone -> screenModel.handleCatch(FunKeyZoneType.KEY, 0, zone) },
-                                    onSweetSpot = screenModel::toggleSweetSpot,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                                Text("► NEXT", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
-                            Box(
-                                modifier = Modifier
-                                    .weight(actionWeight)
-                                    .fillMaxWidth(),
-                                contentAlignment = Alignment.TopCenter
+                        }
+
+                        Button(
+                            onClick = screenModel::skipParticipant,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                FunKeyActionRow(
-                                    sweetSpotOn = sweetSpotOn,
-                                    onMiss = screenModel::incrementMisses,
-                                    onSweetSpot = screenModel::toggleSweetSpot,
-                                    onReset = screenModel::reset,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                Text("►► SKIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = { isFlipped = !isFlipped },
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("⇄ FLIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
                         }
                     }
+
+                    // Empty spacer to align with right column
+                    Spacer(modifier = Modifier.weight(0.3f))
                 }
             }
         }
@@ -263,67 +277,423 @@ object FunKeyScreen : Screen {
                 }
             )
         }
+
+        if (showClearTeamsDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearTeamsDialog = false },
+                title = { Text("Clear All Teams?") },
+                text = { Text("Are you sure you want to clear all teams? This action cannot be undone.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            screenModel.clearParticipants()
+                            showClearTeamsDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Clear")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showClearTeamsDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showResetRoundDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetRoundDialog = false },
+                title = { Text("Reset Round?") },
+                text = { Text("Are you sure you want to reset the round? This will clear the current score and progress.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            screenModel.reset()
+                            showResetRoundDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Reset")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showResetRoundDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+    }
+}
+
+
+@Composable
+private fun FunKeyHeaderCard(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
+    activeParticipant: FunKeyParticipant?,
+    score: Int,
+    obstaclesCount: Int,
+    catchesCount: Int,
+    onUndo: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        elevation = 4.dp,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Column 1: Home button, active team, and Undo button
+            Column(
+                verticalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxHeight()
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GameHomeButton(navigator = navigator)
+                        Text(
+                            text = "Fun Key",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = activeParticipant?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
+                        fontSize = 13.sp,
+                        color = Color.DarkGray
+                    )
+                }
+
+                // Undo button at bottom of this column
+                Button(
+                    onClick = onUndo,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFFFF9800),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.height(38.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                ) {
+                    Text("UNDO", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+
+            // Column 2: Counters centered
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Obstacles counter
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Obstacles:",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.DarkGray
+                    )
+                    Text(
+                        text = obstaclesCount.toString(),
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2979FF)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Catches counter
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Catches:",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.DarkGray
+                    )
+                    Text(
+                        text = catchesCount.toString(),
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00C853)
+                    )
+                }
+            }
+
+            // Column 3: Score
+            Column(
+                modifier = Modifier.weight(0.8f),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Column(horizontalAlignment = Alignment.End) {
+                    // Score on one line
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text("Score: ", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = score.toString(),
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun FunKeyTimerCard(
+    timerRunning: Boolean,
+    onStartStop: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Top row: TIMER and PAUSE buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { if (!timerRunning) onStartStop() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("▶", fontSize = 16.sp)
+                        Text("TIMER", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { if (timerRunning) onStartStop() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⏸", fontSize = 16.sp)
+                        Text("PAUSE", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Bottom row: EDIT and RESET buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { /* Edit */ },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✎", fontSize = 16.sp)
+                        Text("EDIT", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { /* Reset */ },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("↻", fontSize = 16.sp)
+                        Text("RESET", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun FunKeyTopBar(
-    navigator: cafe.adriel.voyager.navigator.Navigator,
-    isTimerRunning: Boolean,
-    score: Int,
-    misses: Int,
-    activeParticipant: FunKeyParticipant?,
-    onTimerToggle: () -> Unit,
-    onAddTeam: () -> Unit
+private fun FunKeyQueueCard(
+    participants: List<FunKeyParticipant>,
+    modifier: Modifier = Modifier
 ) {
-    Card(elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+    Card(
+        modifier = modifier.fillMaxWidth().fillMaxHeight(),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            GameHomeButton(
-                navigator = navigator,
-                modifier = Modifier
-                    .height(40.dp)
+            Text(
+                "Queue",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(bottom = 4.dp)
             )
 
+            // Display teams in queue - scrollable list that fills available space
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (participants.isEmpty()) {
+                    item {
+                        Text(
+                            "No teams in queue",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                } else {
+                    items(count = participants.size) { index ->
+                        val participant = participants[index]
+                        val isCurrentTeam = index == 0
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = if (isCurrentTeam) Color(0xFFE3F2FD) else Color.White,
+                            elevation = if (isCurrentTeam) 2.dp else 0.dp,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                horizontalArrangement = Arrangement.Start,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (isCurrentTeam) "▶ ${participant.handler} & ${participant.dog}"
+                                           else "${participant.handler} & ${participant.dog}",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isCurrentTeam) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isCurrentTeam) Color(0xFF1976D2) else Color.Black
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FunKeyTeamManagementCard(
+    onClearTeams: () -> Unit,
+    onImport: () -> Unit,
+    onAddTeam: () -> Unit,
+    onExport: () -> Unit,
+    onResetRound: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Button(
-                onClick = onTimerToggle,
+                onClick = onClearTeams,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
                 colors = ButtonDefaults.buttonColors(
-                    backgroundColor = if (isTimerRunning) vWarning else vPrimary,
-                    contentColor = if (isTimerRunning) vWarningOn else vPrimaryOn
+                    backgroundColor = Color(0xFF7B1FA2),
+                    contentColor = Color.White
                 ),
-                modifier = Modifier.height(40.dp)
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
             ) {
-                Text(if (isTimerRunning) "Stop Timer" else "Start Timer", fontSize = 12.sp)
+                Text("CLEAR TEAMS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Current Team", fontSize = 11.sp, color = mdOutline)
-                Text(
-                    activeParticipant?.let { "${it.handler} & ${it.dog}" } ?: "No team loaded",
-                    fontWeight = FontWeight.Bold,
-                    color = mdText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onImport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                ) {
+                    Text("IMPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onAddTeam,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                ) {
+                    Text("ADD TEAM", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("Score", fontSize = 11.sp, color = mdOutline)
-                Text("$score", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = mdText)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onExport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                ) {
+                    Text("EXPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("Misses", fontSize = 11.sp, color = mdOutline)
-                Text("$misses", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = mdText)
-            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
             Button(
-                onClick = onAddTeam,
-                colors = ButtonDefaults.buttonColors(backgroundColor = mdPrimaryContainer, contentColor = mdPrimary),
-                modifier = Modifier.height(40.dp)
+                onClick = onResetRound,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFFD50000),
+                    contentColor = Color.White
+                ),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
             ) {
-                Text("Add Team", fontSize = 12.sp)
+                Text("RESET ROUND", fontWeight = FontWeight.Bold, fontSize = 11.sp)
             }
         }
     }
@@ -348,38 +718,115 @@ private fun FunKeyFieldCard(
     onJump: (Int, String) -> Unit,
     onKey: (Int, String) -> Unit,
     onSweetSpot: () -> Unit,
+    isFlipped: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    Card(elevation = 8.dp, modifier = modifier) {
-        BoxWithConstraints {
-            val spacing = 12.dp
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(mdSurfaceContainer)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(spacing)
-            ) {
-                FieldRow(modifier = Modifier.weight(1f)) {
-                    JumpCell("Jump 3", jump3Count, isPurpleEnabled) { onJump(3, "JUMP3") }
-                    KeyCell("Key 1", 1, key1Count, isBlueEnabled, activatedKeys.contains("KEY1")) { onKey(1, "KEY1") }
-                    JumpCell("Jump 1", jump1Count, isPurpleEnabled) { onJump(1, "JUMP1") }
-                    KeyCell("Key 2", 2, key2Count, isBlueEnabled, activatedKeys.contains("KEY2")) { onKey(2, "KEY2") }
-                    JumpCell("Jump 3", jump3bCount, isPurpleEnabled) { onJump(3, "JUMP3B") }
+    Card(
+        modifier = modifier.fillMaxSize(),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+        elevation = 8.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (!isFlipped) {
+                // Normal layout
+                // Row 1: Jump3, Key1, Jump1, Key2, Jump3b
+                Row(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    JumpCell("jump_3pts_left", "Jump 3 PTS", jump3Count, isPurpleEnabled) { onJump(3, "JUMP3") }
+                    KeyCell("1", 1, key1Count, isBlueEnabled, activatedKeys.contains("KEY1")) { onKey(1, "KEY1") }
+                    JumpCell("jump_1pt", "Jump 1 PTS", jump1Count, isPurpleEnabled) { onJump(1, "JUMP1") }
+                    KeyCell("2", 2, key2Count, isBlueEnabled, activatedKeys.contains("KEY2")) { onKey(2, "KEY2") }
+                    JumpCell("jump_3pts_right", "Jump 3 PTS", jump3bCount, isPurpleEnabled) { onJump(3, "JUMP3B") }
                 }
-                FieldRow(modifier = Modifier.weight(0.6f)) {
-                    SpacerCell()
-                    SpacerCell()
+
+                // Row 2: Empty, Empty, Sweet Spot, Empty, Empty
+                Row(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GreyCell()
+                    GreyCell()
                     SweetSpotCell(sweetSpotOn, onSweetSpot)
-                    SpacerCell()
-                    SpacerCell()
+                    GreyCell()
+                    GreyCell()
                 }
-                FieldRow(modifier = Modifier.weight(1f)) {
-                    JumpCell("Jump 2", jump2Count, isPurpleEnabled) { onJump(2, "JUMP2") }
-                    KeyCell("Key 4", 4, key4Count, isBlueEnabled, activatedKeys.contains("KEY4")) { onKey(4, "KEY4") }
-                    JumpCell("Tunnel", tunnelCount, isPurpleEnabled) { onJump(0, "TUNNEL") }
-                    KeyCell("Key 3", 3, key3Count, isBlueEnabled, activatedKeys.contains("KEY3")) { onKey(3, "KEY3") }
-                    JumpCell("Jump 2", jump2bCount, isPurpleEnabled) { onJump(2, "JUMP2B") }
+
+                // Row 3: Jump2, Key4, Tunnel, Key3, Jump2b
+                Row(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    JumpCell("jump_2pts_left", "Jump 2 PTS", jump2Count, isPurpleEnabled) { onJump(2, "JUMP2") }
+                    KeyCell("4", 4, key4Count, isBlueEnabled, activatedKeys.contains("KEY4")) { onKey(4, "KEY4") }
+                    JumpCell("tunnel", "Tunnel 1 PTS", tunnelCount, isPurpleEnabled) { onJump(0, "TUNNEL") }
+                    KeyCell("3", 3, key3Count, isBlueEnabled, activatedKeys.contains("KEY3")) { onKey(3, "KEY3") }
+                    JumpCell("jump_2pts_right", "Jump 2 PTS", jump2bCount, isPurpleEnabled) { onJump(2, "JUMP2B") }
+                }
+            } else {
+                // Flipped layout - rows become columns
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Column 1: Jump3, Empty, Jump2
+                    Column(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        JumpCell("jump_3pts_left", "Jump 3 PTS", jump3Count, isPurpleEnabled) { onJump(3, "JUMP3") }
+                        GreyCell()
+                        JumpCell("jump_2pts_left", "Jump 2 PTS", jump2Count, isPurpleEnabled) { onJump(2, "JUMP2") }
+                    }
+
+                    // Column 2: Key1, Empty, Key4
+                    Column(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        KeyCell("1", 1, key1Count, isBlueEnabled, activatedKeys.contains("KEY1")) { onKey(1, "KEY1") }
+                        GreyCell()
+                        KeyCell("4", 4, key4Count, isBlueEnabled, activatedKeys.contains("KEY4")) { onKey(4, "KEY4") }
+                    }
+
+                    // Column 3: Jump1, Sweet Spot, Tunnel
+                    Column(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        JumpCell("jump_1pt", "Jump 1 PTS", jump1Count, isPurpleEnabled) { onJump(1, "JUMP1") }
+                        SweetSpotCell(sweetSpotOn, onSweetSpot)
+                        JumpCell("tunnel", "Tunnel 1 PTS", tunnelCount, isPurpleEnabled) { onJump(0, "TUNNEL") }
+                    }
+
+                    // Column 4: Key2, Empty, Key3
+                    Column(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        KeyCell("2", 2, key2Count, isBlueEnabled, activatedKeys.contains("KEY2")) { onKey(2, "KEY2") }
+                        GreyCell()
+                        KeyCell("3", 3, key3Count, isBlueEnabled, activatedKeys.contains("KEY3")) { onKey(3, "KEY3") }
+                    }
+
+                    // Column 5: Jump3b, Empty, Jump2b
+                    Column(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        JumpCell("jump_3pts_right", "Jump 3 PTS", jump3bCount, isPurpleEnabled) { onJump(3, "JUMP3B") }
+                        GreyCell()
+                        JumpCell("jump_2pts_right", "Jump 2 PTS", jump2bCount, isPurpleEnabled) { onJump(2, "JUMP2B") }
+                    }
                 }
             }
         }
@@ -387,35 +834,39 @@ private fun FunKeyFieldCard(
 }
 
 @Composable
-private fun FieldRow(
-    modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        content()
-    }
-}
-
-@Composable
-private fun RowScope.JumpCell(label: String, count: Int, enabled: Boolean, onClick: () -> Unit) {
+private fun RowScope.JumpCell(imageName: String, pointsText: String, count: Int, enabled: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         enabled = enabled,
         colors = ButtonDefaults.buttonColors(
-            backgroundColor = if (enabled) vPrimary else mdOutlineVariant,
-            contentColor = if (enabled) vPrimaryOn else mdOutline
+            backgroundColor = if (enabled) Color(0xFFF500A1) else Color(0xFFE0E0E0), // Pink default
+            contentColor = if (enabled) Color.White else Color(0xFF9E9E9E),
+            disabledBackgroundColor = Color(0xFFE0E0E0),
+            disabledContentColor = Color(0xFF9E9E9E)
         ),
         modifier = Modifier
             .weight(1f)
             .fillMaxHeight()
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, fontWeight = FontWeight.Bold)
-            Text("$count", fontSize = 18.sp)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = pointsText,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                fontSize = 14.sp
+            )
+            if (count > 0) {
+                Text(
+                    text = "[$count]",
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    fontSize = 12.sp,
+                    color = if (enabled) Color.White else Color(0xFF9E9E9E)
+                )
+            }
         }
     }
 }
@@ -434,23 +885,42 @@ private fun RowScope.KeyCell(
         enabled = enabled && !isActivated,
         colors = ButtonDefaults.buttonColors(
             backgroundColor = when {
-                isActivated -> vSuccess
-                enabled -> Color(0xFFF500A1)
-                else -> mdOutlineVariant
+                isActivated -> vSuccess // Green when activated
+                enabled -> Color(0xFFF500A1) // Pink default
+                else -> Color(0xFFE0E0E0)
             },
             contentColor = when {
                 isActivated -> vSuccessOn
                 enabled -> Color.White
-                else -> mdOutline
+                else -> Color(0xFF9E9E9E)
+            },
+            disabledBackgroundColor = when {
+                isActivated -> vSuccess
+                else -> Color(0xFFE0E0E0)
+            },
+            disabledContentColor = when {
+                isActivated -> vSuccessOn
+                else -> Color(0xFF9E9E9E)
             }
         ),
         modifier = Modifier
             .weight(1f)
             .fillMaxHeight()
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("$points pt", fontWeight = FontWeight.Bold)
-            Text("x$count", fontSize = 16.sp)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = label,
+                fontWeight = FontWeight.Bold,
+                fontSize = 48.sp
+            )
+            Text(
+                text = "$points PT",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
@@ -467,152 +937,26 @@ private fun RowScope.SweetSpotCell(sweetSpotOn: Boolean, onClick: () -> Unit) {
             .weight(1f)
             .fillMaxHeight()
     ) {
-        Text("Sweet Spot", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
+        Text("SWEET\nSPOT", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold, fontSize = 14.sp)
     }
 }
 
 @Composable
-private fun RowScope.SpacerCell() {
-    Spacer(modifier = Modifier.weight(1f).fillMaxHeight())
-}
-
-@Composable
-private fun FunKeyActionRow(
-    sweetSpotOn: Boolean,
-    onMiss: () -> Unit,
-    onSweetSpot: () -> Unit,
-    onReset: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 56.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Button(
-            onClick = onMiss,
-            colors = ButtonDefaults.buttonColors(backgroundColor = vWarning, contentColor = vWarningOn),
-            modifier = Modifier.weight(1f)
-        ) { Text("Miss+") }
-        Button(
-            onClick = onSweetSpot,
-            colors = ButtonDefaults.buttonColors(
-                backgroundColor = if (sweetSpotOn) vSuccess else vPrimary,
-                contentColor = if (sweetSpotOn) vSuccessOn else vPrimaryOn
-            ),
-            modifier = Modifier.weight(1f)
-        ) { Text(if (sweetSpotOn) "Sweet Spot On" else "Sweet Spot") }
-        Button(
-            onClick = onReset,
-            colors = ButtonDefaults.buttonColors(backgroundColor = mdPrimaryContainer, contentColor = mdPrimary),
-            modifier = Modifier.weight(1f)
-        ) { Text("Reset Score") }
-    }
-}
-
-@Composable
-private fun ParticipantQueueCard(
-    activeParticipant: FunKeyParticipant?,
-    participantQueue: List<FunKeyParticipant>,
-    modifier: Modifier = Modifier
-) {
-    Card(elevation = 6.dp, modifier = modifier) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Teams", style = MaterialTheme.typography.h6)
-            activeParticipant?.let {
-                Text("Now Playing", fontSize = 12.sp, color = mdOutline)
-                Text("${it.handler} & ${it.dog}", fontWeight = FontWeight.Bold)
-                Text(it.utn, fontSize = 12.sp, color = mdOutline)
-            } ?: Text("No active team", color = mdOutline)
-            Text("Queue (${participantQueue.size})", fontSize = 12.sp, color = mdOutline)
-            if (participantQueue.isEmpty()) {
-                Text("No teams waiting", color = mdOutline)
-            } else {
-                LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                    itemsIndexed(participantQueue) { index, participant ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                        ) {
-                            Text("${index + 1}. ${participant.handler} & ${participant.dog}", fontWeight = FontWeight.Medium)
-                            Text(participant.utn, fontSize = 12.sp, color = mdOutline)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun FunKeySidebar(
-    modifier: Modifier = Modifier,
-    onImport: () -> Unit,
-    onExport: () -> Unit,
-    onAddTeam: () -> Unit,
-    onNext: () -> Unit,
-    onSkip: () -> Unit,
-    onResetScore: () -> Unit,
-    onClearState: () -> Unit
-) {
-    Card(elevation = 6.dp, modifier = modifier) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text("Actions", style = MaterialTheme.typography.h6)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SidebarButton("Import", mdPrimary, Color.White, onImport, Modifier.weight(1f))
-                    SidebarButton("Export", vPrimary, vPrimaryOn, onExport, Modifier.weight(1f))
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SidebarButton("Add Team", vSuccess, vSuccessOn, onAddTeam, Modifier.weight(1f))
-                    SidebarButton("Reset Score", mdPrimaryContainer, mdPrimary, onResetScore, Modifier.weight(1f))
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SidebarButton("Next", Color(0xFFF500A1), Color.White, onNext, Modifier.weight(1f))
-                    SidebarButton("Skip", Color(0xFF00B8D4), Color.White, onSkip, Modifier.weight(1f))
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SidebarButton("Clear State", Color(0xFFD50000), Color.White, onClearState, Modifier.weight(1f))
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SidebarButton(
-    text: String,
-    background: Color,
-    content: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+private fun RowScope.GreyCell() {
     Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(backgroundColor = background, contentColor = content),
-        modifier = modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 44.dp)
+        onClick = { /* Inactive */ },
+        enabled = false,
+        colors = ButtonDefaults.buttonColors(
+            backgroundColor = Color(0xFFE0E0E0),
+            contentColor = Color(0xFF9E9E9E),
+            disabledBackgroundColor = Color(0xFFE0E0E0),
+            disabledContentColor = Color(0xFF9E9E9E)
+        ),
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
     ) {
-        Text(text, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        Text("")
     }
 }
 
@@ -642,7 +986,7 @@ private fun FunKeyAddParticipantDialog(onDismiss: () -> Unit, onAdd: (String, St
             ) { Text("Add") }
         },
         dismissButton = {
-            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(backgroundColor = mdOutlineVariant, contentColor = mdText)) {
+            Button(onClick = onDismiss) {
                 Text("Cancel")
             }
         }
@@ -665,4 +1009,132 @@ private fun exportParticipants(
         }
     }
     exporter.save("FunKeyParticipants.csv", csv.encodeToByteArray())
+}
+
+// ColumnScope versions for flipped layout
+@Composable
+private fun ColumnScope.JumpCell(imageName: String, pointsText: String, count: Int, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        colors = ButtonDefaults.buttonColors(
+            backgroundColor = if (enabled) Color(0xFFF500A1) else Color(0xFFE0E0E0),
+            contentColor = if (enabled) Color.White else Color(0xFF9E9E9E),
+            disabledBackgroundColor = Color(0xFFE0E0E0),
+            disabledContentColor = Color(0xFF9E9E9E)
+        ),
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = pointsText,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                fontSize = 14.sp
+            )
+            if (count > 0) {
+                Text(
+                    text = "[$count]",
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    fontSize = 12.sp,
+                    color = if (enabled) Color.White else Color(0xFF9E9E9E)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.KeyCell(
+    label: String,
+    points: Int,
+    count: Int,
+    enabled: Boolean,
+    isActivated: Boolean,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled && !isActivated,
+        colors = ButtonDefaults.buttonColors(
+            backgroundColor = when {
+                isActivated -> vSuccess
+                enabled -> Color(0xFFF500A1)
+                else -> Color(0xFFE0E0E0)
+            },
+            contentColor = when {
+                isActivated -> vSuccessOn
+                enabled -> Color.White
+                else -> Color(0xFF9E9E9E)
+            },
+            disabledBackgroundColor = when {
+                isActivated -> vSuccess
+                else -> Color(0xFFE0E0E0)
+            },
+            disabledContentColor = when {
+                isActivated -> vSuccessOn
+                else -> Color(0xFF9E9E9E)
+            }
+        ),
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = label,
+                fontWeight = FontWeight.Bold,
+                fontSize = 48.sp
+            )
+            Text(
+                text = "$points PT",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.SweetSpotCell(sweetSpotOn: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            backgroundColor = if (sweetSpotOn) vSuccess else vPrimary,
+            contentColor = if (sweetSpotOn) vSuccessOn else vPrimaryOn
+        ),
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+    ) {
+        Text("SWEET\nSPOT", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    }
+}
+
+@Composable
+private fun ColumnScope.GreyCell() {
+    Button(
+        onClick = { /* Inactive */ },
+        enabled = false,
+        colors = ButtonDefaults.buttonColors(
+            backgroundColor = Color(0xFFE0E0E0),
+            contentColor = Color(0xFF9E9E9E),
+            disabledBackgroundColor = Color(0xFFE0E0E0),
+            disabledContentColor = Color(0xFF9E9E9E)
+        ),
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+    ) {
+        Text("")
+    }
 }
