@@ -124,6 +124,17 @@ object TimeWarpScreen : Screen {
             screenModel.consumePendingJsonExport()
         }
 
+        // Audio timer setup
+        val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Time Warp") })
+
+        LaunchedEffect(isAudioTimerPlaying) {
+            if (isAudioTimerPlaying) {
+                audioPlayer.play()
+            } else {
+                audioPlayer.stop()
+            }
+        }
+
         // Add team dialog state
         var handler by remember { mutableStateOf("") }
         var dog by remember { mutableStateOf("") }
@@ -704,28 +715,70 @@ private fun TimeWarpTimerCard(
     modifier: Modifier = Modifier
 ) {
     Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Button(
-                onClick = onTimerAudioToggle,
-                modifier = Modifier.fillMaxWidth().height(80.dp),
-                colors = androidx.compose.material.ButtonDefaults.buttonColors(
-                    backgroundColor = if (isAudioTimerPlaying) Color(0xFFFF9800) else Color(0xFF00BCD4),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("♪", fontSize = 32.sp)
-                    Text("AUDIO TIMER", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text(
-                        if (isAudioTimerPlaying) "ON" else "OFF",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Top row: TIMER and PAUSE buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { if (!isAudioTimerPlaying) onTimerAudioToggle() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("▶", fontSize = 16.sp)
+                        Text("TIMER", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { if (isAudioTimerPlaying) onTimerAudioToggle() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⏸", fontSize = 16.sp)
+                        Text("PAUSE", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Bottom row: EDIT and RESET buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { /* Edit */ },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✎", fontSize = 16.sp)
+                        Text("EDIT", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { /* Reset */ },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("↻", fontSize = 16.sp)
+                        Text("RESET", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
                 }
             }
         }
