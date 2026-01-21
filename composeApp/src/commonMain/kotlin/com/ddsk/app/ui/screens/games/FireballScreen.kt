@@ -105,7 +105,7 @@ object FireballScreen : Screen {
 
         // Audio player for timer - randomly selects one of 6 fireball timer audio files
         // The key ensures a new random file is selected each time the timer starts
-        val currentAudioFileName = remember(audioSelectionKey) { getTimerAssetForGame("Fire Ball") }
+       val currentAudioFileName = remember(audioSelectionKey) { getTimerAssetForGame("Fire Ball") }
         val audioPlayer = rememberAudioPlayer(currentAudioFileName)
 
         // Extract just the filename from the full path for display
