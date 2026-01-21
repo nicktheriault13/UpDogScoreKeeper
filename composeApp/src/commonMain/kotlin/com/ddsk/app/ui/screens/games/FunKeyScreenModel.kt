@@ -8,6 +8,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -15,12 +17,41 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 @Serializable
 data class FunKeyParticipant(
     val handler: String,
     val dog: String,
     val utn: String
+)
+
+@Serializable
+data class FunKeyRoundData(
+    val jump3Sum: Int,
+    val jump2Sum: Int,
+    val jump1TunnelSum: Int,
+    val onePointClicks: Int,
+    val twoPointClicks: Int,
+    val threePointClicks: Int,
+    val fourPointClicks: Int,
+    val sweetSpot: Boolean,
+    val allRollers: Boolean,
+    val score: Int,
+    val roundTimestamp: String
+)
+
+@Serializable
+data class FunKeyCompletedParticipant(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val score: Int,
+    val sweetSpot: Boolean,
+    val allRollers: Boolean,
+    val roundData: FunKeyRoundData
 )
 
 enum class FunKeyZoneType { JUMP, KEY }
@@ -30,6 +61,7 @@ data class FunKeyUiState(
     val score: Int = 0,
     val misses: Int = 0,
     val sweetSpotOn: Boolean = false,
+    val allRollers: Boolean = false,
     val activatedKeys: Set<String> = emptySet(),
     val isPurpleEnabled: Boolean = true,
     val isBlueEnabled: Boolean = false,
@@ -45,7 +77,7 @@ data class FunKeyUiState(
     val key4Count: Int = 0,
     val activeParticipant: FunKeyParticipant? = null,
     val queue: List<FunKeyParticipant> = emptyList(),
-    val completed: List<FunKeyParticipant> = emptyList()
+    val completed: List<FunKeyCompletedParticipant> = emptyList()
 )
 
 class FunKeyScreenModel : ScreenModel {
@@ -63,6 +95,7 @@ class FunKeyScreenModel : ScreenModel {
     val score = _uiState.map { it.score }.stateIn(scope, SharingStarted.Eagerly, 0)
     val misses = _uiState.map { it.misses }.stateIn(scope, SharingStarted.Eagerly, 0)
     val sweetSpotOn = _uiState.map { it.sweetSpotOn }.stateIn(scope, SharingStarted.Eagerly, false)
+    val allRollers = _uiState.map { it.allRollers }.stateIn(scope, SharingStarted.Eagerly, false)
     val activatedKeys = _uiState.map { it.activatedKeys }.stateIn(scope, SharingStarted.Eagerly, emptySet())
 
     val isPurpleEnabled = _uiState.map { it.isPurpleEnabled }.stateIn(scope, SharingStarted.Eagerly, true)
@@ -82,6 +115,64 @@ class FunKeyScreenModel : ScreenModel {
 
     val activeParticipant = _uiState.map { it.activeParticipant }.stateIn(scope, SharingStarted.Eagerly, null)
     val participantQueue = _uiState.map { it.queue }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    val completedParticipants = _uiState.map { it.completed }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    // ---- JSON export (triggered on Next Team) ----
+
+    @Serializable
+    data class PendingJsonExport(
+        val filename: String,
+        val content: String
+    )
+
+    @Serializable
+    private data class FunKeyRoundExport(
+        val gameMode: String,
+        val exportTimestamp: String,
+        val participantData: FunKeyParticipantData,
+        val roundResults: FunKeyRoundResults
+    )
+
+    @Serializable
+    private data class FunKeyParticipantData(
+        val handler: String,
+        val dog: String,
+        val utn: String,
+        val completedAt: String
+    )
+
+    @Serializable
+    private data class FunKeyRoundResults(
+        val jump3Sum: Int,
+        val jump2Sum: Int,
+        val jump1TunnelSum: Int,
+        val onePointClicks: Int,
+        val twoPointClicks: Int,
+        val threePointClicks: Int,
+        val fourPointClicks: Int,
+        val sweetSpot: String,
+        val allRollers: String,
+        val totalScore: Int
+    )
+
+    // JSON export infrastructure
+    private val exportJson = Json {
+        prettyPrint = true
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
+
+    private val _pendingJsonExport = MutableStateFlow<PendingJsonExport?>(null)
+    val pendingJsonExport: StateFlow<PendingJsonExport?> = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
+
+    private fun safeNamePart(input: String, fallback: String): String {
+        val cleaned = input.trim().replace(Regex("[^a-zA-Z0-9]"), "")
+        return if (cleaned.isEmpty()) fallback else cleaned
+    }
 
     private var dataStore: DataStore? = null
     private val persistenceKey = "FunKeyData.json"
@@ -127,6 +218,13 @@ class FunKeyScreenModel : ScreenModel {
         persistState()
     }
 
+    fun toggleAllRollers() {
+        _uiState.update { state ->
+            state.copy(allRollers = !state.allRollers)
+        }
+        persistState()
+    }
+
     fun incrementMisses() {
         _uiState.update { it.copy(misses = it.misses + 1) }
         persistState()
@@ -154,15 +252,15 @@ class FunKeyScreenModel : ScreenModel {
     private fun handleJumpCatchInternal(state: FunKeyUiState, zone: String): FunKeyUiState {
         if (!state.isPurpleEnabled) return state
 
-        // React scoring rules:
-        // Jump3 = +3, Jump2 = +2, Jump1 = +0 (count only), Tunnel = +0 (count only)
+        // Scoring rules:
+        // Jump3 = +3, Jump2 = +2, Jump1 = +1, Tunnel = +1
         val (delta, updated) = when (zone) {
             "JUMP3" -> 3 to state.copy(jump3Count = state.jump3Count + 1)
             "JUMP3B" -> 3 to state.copy(jump3bCount = state.jump3bCount + 1)
             "JUMP2" -> 2 to state.copy(jump2Count = state.jump2Count + 1)
             "JUMP2B" -> 2 to state.copy(jump2bCount = state.jump2bCount + 1)
-            "JUMP1" -> 0 to state.copy(jump1Count = state.jump1Count + 1)
-            "TUNNEL" -> 0 to state.copy(tunnelCount = state.tunnelCount + 1)
+            "JUMP1" -> 1 to state.copy(jump1Count = state.jump1Count + 1)
+            "TUNNEL" -> 1 to state.copy(tunnelCount = state.tunnelCount + 1)
             else -> 0 to state
         }
 
@@ -236,6 +334,7 @@ class FunKeyScreenModel : ScreenModel {
                 score = 0,
                 misses = 0,
                 sweetSpotOn = false,
+                allRollers = false,
                 activatedKeys = emptySet(),
                 isPurpleEnabled = true,
                 isBlueEnabled = false,
@@ -260,6 +359,7 @@ class FunKeyScreenModel : ScreenModel {
             it.copy(
                 score = 0,
                 sweetSpotOn = false,
+                allRollers = false,
                 activatedKeys = emptySet(),
                 isPurpleEnabled = true,
                 isBlueEnabled = false,
@@ -293,9 +393,83 @@ class FunKeyScreenModel : ScreenModel {
     fun nextParticipant() {
         _uiState.update { state ->
             val active = state.activeParticipant ?: return@update state
-            val completed = state.completed + active
+
+            // Create round data from current state
+            val jump3Sum = state.jump3Count + state.jump3bCount
+            val jump2Sum = state.jump2Count + state.jump2bCount
+            val jump1TunnelSum = state.jump1Count + state.tunnelCount
+
+            val roundData = FunKeyRoundData(
+                jump3Sum = jump3Sum,
+                jump2Sum = jump2Sum,
+                jump1TunnelSum = jump1TunnelSum,
+                onePointClicks = state.key1Count,
+                twoPointClicks = state.key2Count,
+                threePointClicks = state.key3Count,
+                fourPointClicks = state.key4Count,
+                sweetSpot = state.sweetSpotOn,
+                allRollers = state.allRollers,
+                score = state.score,
+                roundTimestamp = kotlinx.datetime.Clock.System.now().toString()
+            )
+
+            // Create completed participant with round data
+            val completedParticipant = FunKeyCompletedParticipant(
+                handler = active.handler,
+                dog = active.dog,
+                utn = active.utn,
+                score = state.score,
+                sweetSpot = state.sweetSpotOn,
+                allRollers = state.allRollers,
+                roundData = roundData
+            )
+
+            // Emit JSON export for this participant
+            val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+            fun pad(n: Int) = n.toString().padStart(2, '0')
+            val stamp = buildString {
+                append(now.year)
+                append(pad(now.monthNumber))
+                append(pad(now.dayOfMonth))
+                append('_')
+                append(pad(now.hour))
+                append(pad(now.minute))
+                append(pad(now.second))
+            }
+            val filename = "FunKey_${safeNamePart(active.handler, "Handler")}_${safeNamePart(active.dog, "Dog")}_${stamp}.json"
+
+            val exportData = FunKeyRoundExport(
+                gameMode = "Fun Key",
+                exportTimestamp = Clock.System.now().toString(),
+                participantData = FunKeyParticipantData(
+                    handler = active.handler,
+                    dog = active.dog,
+                    utn = active.utn,
+                    completedAt = now.toString()
+                ),
+                roundResults = FunKeyRoundResults(
+                    jump3Sum = jump3Sum,
+                    jump2Sum = jump2Sum,
+                    jump1TunnelSum = jump1TunnelSum,
+                    onePointClicks = state.key1Count,
+                    twoPointClicks = state.key2Count,
+                    threePointClicks = state.key3Count,
+                    fourPointClicks = state.key4Count,
+                    sweetSpot = if (state.sweetSpotOn) "Yes" else "No",
+                    allRollers = if (state.allRollers) "Yes" else "No",
+                    totalScore = state.score
+                )
+            )
+
+            _pendingJsonExport.value = PendingJsonExport(
+                filename = filename,
+                content = exportJson.encodeToString(exportData)
+            )
+
+            val completed = state.completed + completedParticipant
             val next = state.queue.firstOrNull()
             val remaining = if (state.queue.isNotEmpty()) state.queue.drop(1) else emptyList()
+
             // Move to next team and clear per-run state
             state.copy(
                 activeParticipant = next,
@@ -304,6 +478,7 @@ class FunKeyScreenModel : ScreenModel {
                 score = 0,
                 misses = 0,
                 sweetSpotOn = false,
+                allRollers = false,
                 activatedKeys = emptySet(),
                 isPurpleEnabled = true,
                 isBlueEnabled = false,
@@ -334,6 +509,7 @@ class FunKeyScreenModel : ScreenModel {
                 score = 0,
                 misses = 0,
                 sweetSpotOn = false,
+                allRollers = false,
                 activatedKeys = emptySet(),
                 isPurpleEnabled = true,
                 isBlueEnabled = false,
@@ -357,20 +533,39 @@ class FunKeyScreenModel : ScreenModel {
         persistState()
     }
 
-    fun importParticipantsFromCsv(csvText: String) {
-        val imported = parseCsv(csvText)
-        val participants = imported.map { FunKeyParticipant(it.handler, it.dog, it.utn) }
-        if (participants.isEmpty()) return
-        _uiState.value = _uiState.value.copy(activeParticipant = participants.first(), queue = participants.drop(1))
+    enum class ImportMode { ReplaceAll, Add }
+
+    private fun applyImportedParticipants(players: List<FunKeyParticipant>, mode: ImportMode) {
+        if (players.isEmpty()) return
+        _uiState.update { s ->
+            when (mode) {
+                ImportMode.ReplaceAll -> s.copy(
+                    activeParticipant = players.first(),
+                    queue = players.drop(1),
+                    completed = emptyList()
+                )
+                ImportMode.Add -> {
+                    if (s.activeParticipant == null) {
+                        s.copy(activeParticipant = players.first(), queue = players.drop(1))
+                    } else {
+                        s.copy(queue = s.queue + players)
+                    }
+                }
+            }
+        }
         persistState()
     }
 
-    fun importParticipantsFromXlsx(bytes: ByteArray) {
+    fun importParticipantsFromCsv(csvText: String, mode: ImportMode = ImportMode.ReplaceAll) {
+        val imported = parseCsv(csvText)
+        val participants = imported.map { FunKeyParticipant(it.handler, it.dog, it.utn) }
+        applyImportedParticipants(participants, mode)
+    }
+
+    fun importParticipantsFromXlsx(bytes: ByteArray, mode: ImportMode = ImportMode.ReplaceAll) {
         val imported = parseXlsx(bytes)
         val participants = imported.map { FunKeyParticipant(it.handler, it.dog, it.utn) }
-        if (participants.isEmpty()) return
-        _uiState.value = _uiState.value.copy(activeParticipant = participants.first(), queue = participants.drop(1))
-        persistState()
+        applyImportedParticipants(participants, mode)
     }
 
     private fun checkPhaseTransition() {

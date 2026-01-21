@@ -479,6 +479,53 @@ actual fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateB
     }
 }
 
+actual fun generateFunKeyXlsm(participants: List<FunKeyExportParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 (0-based)
+
+        participants.forEachIndexed { index, p ->
+            val rowNum = startRow + index
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+
+            // Column B (1): Handler
+            row.createCell(1).setCellValue(p.handler)
+            // Column C (2): Dog
+            row.createCell(2).setCellValue(p.dog)
+            // Column D (3): UTN
+            row.createCell(3).setCellValue(p.utn)
+            // Column E (4): Jump 3 Sum
+            row.createCell(4).setCellValue(p.jump3Sum.toDouble())
+            // Column F (5): Jump 2 Sum
+            row.createCell(5).setCellValue(p.jump2Sum.toDouble())
+            // Column G (6): Jump 1 + Tunnel Sum
+            row.createCell(6).setCellValue(p.jump1TunnelSum.toDouble())
+            // Column H (7): 1-Point Clicks
+            row.createCell(7).setCellValue(p.onePointClicks.toDouble())
+            // Column I (8): 2-Point Clicks
+            row.createCell(8).setCellValue(p.twoPointClicks.toDouble())
+            // Column J (9): 3-Point Clicks
+            row.createCell(9).setCellValue(p.threePointClicks.toDouble())
+            // Column K (10): 4-Point Clicks
+            row.createCell(10).setCellValue(p.fourPointClicks.toDouble())
+            // Column N (13): Sweet Spot (Y/N)
+            row.createCell(13).setCellValue(p.sweetSpot)
+            // Column P (15): All Rollers (Y/N)
+            row.createCell(15).setCellValue(p.allRollers)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
 actual fun generateSpacedOutXlsx(participants: List<SpacedOutExportParticipant>, templateBytes: ByteArray): ByteArray {
     return try {
         val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))

@@ -29,6 +29,22 @@ data class FourWayPlayExportParticipant(
     val misses: Int
 )
 
+@kotlinx.serialization.Serializable
+data class FunKeyExportParticipant(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val jump3Sum: Int,
+    val jump2Sum: Int,
+    val jump1TunnelSum: Int,
+    val onePointClicks: Int,
+    val twoPointClicks: Int,
+    val threePointClicks: Int,
+    val fourPointClicks: Int,
+    val sweetSpot: String, // "Y" or "N"
+    val allRollers: String // "Y" or "N"
+)
+
 // Remove duplicate SevenUpParticipant data class (defined in SevenUpScreenModel).
 // SevenUp XLSM export uses the SevenUpParticipant type from SevenUpScreenModel.
 
@@ -77,6 +93,7 @@ expect fun generateFireballXlsx(participants: List<FireballParticipant>, templat
 expect fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateThrowNGoXlsx(participants: List<ThrowNGoParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateFunKeyXlsm(participants: List<FunKeyExportParticipant>, templateBytes: ByteArray): ByteArray
 // Spaced Out XLSX export
 expect fun generateSpacedOutXlsx(participants: List<SpacedOutExportParticipant>, templateBytes: ByteArray): ByteArray
 

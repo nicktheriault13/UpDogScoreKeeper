@@ -44,6 +44,9 @@ import com.ddsk.app.persistence.*
 import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 // Color Palette
 private val vPrimary = Color(0xFF2979FF)
@@ -62,6 +65,7 @@ object FunKeyScreen : Screen {
         }
         val score by screenModel.score.collectAsState()
         val sweetSpotOn by screenModel.sweetSpotOn.collectAsState()
+        val allRollers by screenModel.allRollers.collectAsState()
         val isPurpleEnabled by screenModel.isPurpleEnabled.collectAsState()
         val isBlueEnabled by screenModel.isBlueEnabled.collectAsState()
         val jump1Count by screenModel.jump1Count.collectAsState()
@@ -77,28 +81,40 @@ object FunKeyScreen : Screen {
         val activatedKeys by screenModel.activatedKeys.collectAsState()
         val activeParticipant by screenModel.activeParticipant.collectAsState()
         val participantQueue by screenModel.participantQueue.collectAsState()
+        val completedParticipants by screenModel.completedParticipants.collectAsState()
 
         var isTimerRunning by remember { mutableStateOf(false) }
         var showAddDialog by remember { mutableStateOf(false) }
         var showClearTeamsDialog by remember { mutableStateOf(false) }
         var showResetRoundDialog by remember { mutableStateOf(false) }
+        var showImportChoice by remember { mutableStateOf(false) }
+        var pendingImport by remember { mutableStateOf<ImportResult?>(null) }
         var isFlipped by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Fun Key") })
         val filePicker = rememberFilePicker { result ->
-            scope.launch {
-                when (result) {
-                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
-                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
-                    else -> {}
+            when (result) {
+                is ImportResult.Csv, is ImportResult.Xlsx -> {
+                    pendingImport = result
+                    showImportChoice = true
                 }
+                else -> Unit
             }
         }
         val fileExporter = rememberFileExporter()
+        val assetLoader = rememberAssetLoader()
 
         LaunchedEffect(isTimerRunning) {
             if (isTimerRunning) audioPlayer.play() else audioPlayer.stop()
+        }
+
+        // Handle JSON export when Next is clicked
+        val pendingJsonExport by screenModel.pendingJsonExport.collectAsState()
+        LaunchedEffect(pendingJsonExport) {
+            val pending = pendingJsonExport ?: return@LaunchedEffect
+            saveJsonFileWithPicker(pending.filename, pending.content)
+            screenModel.consumePendingJsonExport()
         }
 
         Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
@@ -118,7 +134,9 @@ object FunKeyScreen : Screen {
                         score = score,
                         obstaclesCount = jump1Count + jump2Count + jump3Count + jump2bCount + jump3bCount + tunnelCount,
                         catchesCount = key1Count + key2Count + key3Count + key4Count,
+                        allRollers = allRollers,
                         onUndo = screenModel::undo,
+                        onToggleAllRollers = screenModel::toggleAllRollers,
                         modifier = Modifier.weight(2f).fillMaxHeight()
                     )
 
@@ -175,7 +193,13 @@ object FunKeyScreen : Screen {
                             onImport = { filePicker.launch() },
                             onAddTeam = { showAddDialog = true },
                             onExport = {
-                                exportParticipants(fileExporter, activeParticipant, participantQueue)
+                                scope.launch {
+                                    exportToExcel(
+                                        assetLoader = assetLoader,
+                                        fileExporter = fileExporter,
+                                        completed = completedParticipants
+                                    )
+                                }
                             },
                             onResetRound = { showResetRoundDialog = true },
                             modifier = Modifier.weight(1f)
@@ -193,6 +217,23 @@ object FunKeyScreen : Screen {
                         modifier = Modifier.weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        Button(
+                            onClick = { isFlipped = !isFlipped },
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("⇄ FLIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
                         Button(
                             onClick = { /* Previous participant logic */ },
                             colors = ButtonDefaults.buttonColors(
@@ -243,23 +284,6 @@ object FunKeyScreen : Screen {
                                 Text("►► SKIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
                         }
-
-                        Button(
-                            onClick = { isFlipped = !isFlipped },
-                            colors = ButtonDefaults.buttonColors(
-                                backgroundColor = Color(0xFF6750A4),
-                                contentColor = Color.White
-                            ),
-                            modifier = Modifier.weight(1f).height(50.dp),
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("⇄ FLIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            }
-                        }
                     }
 
                     // Empty spacer to align with right column
@@ -274,6 +298,57 @@ object FunKeyScreen : Screen {
                 onAdd = { handler, dog, utn ->
                     screenModel.addParticipant(handler, dog, utn)
                     showAddDialog = false
+                }
+            )
+        }
+
+        if (showImportChoice) {
+            AlertDialog(
+                onDismissRequest = {
+                    showImportChoice = false
+                    pendingImport = null
+                },
+                title = { Text("Import participants") },
+                text = { Text("Do you want to add these participants to the current list, or replace the current list?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val importRes = pendingImport
+                            showImportChoice = false
+                            pendingImport = null
+                            if (importRes != null) {
+                                when (importRes) {
+                                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(importRes.contents, FunKeyScreenModel.ImportMode.Add)
+                                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(importRes.bytes, FunKeyScreenModel.ImportMode.Add)
+                                    else -> Unit
+                                }
+                            }
+                        }
+                    ) { Text("Add") }
+                },
+                dismissButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material.OutlinedButton(
+                            onClick = {
+                                val importRes = pendingImport
+                                showImportChoice = false
+                                pendingImport = null
+                                if (importRes != null) {
+                                    when (importRes) {
+                                        is ImportResult.Csv -> screenModel.importParticipantsFromCsv(importRes.contents, FunKeyScreenModel.ImportMode.ReplaceAll)
+                                        is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(importRes.bytes, FunKeyScreenModel.ImportMode.ReplaceAll)
+                                        else -> Unit
+                                    }
+                                }
+                            }
+                        ) { Text("Replace") }
+                        androidx.compose.material.TextButton(
+                            onClick = {
+                                showImportChoice = false
+                                pendingImport = null
+                            }
+                        ) { Text("Cancel") }
+                    }
                 }
             )
         }
@@ -342,7 +417,9 @@ private fun FunKeyHeaderCard(
     score: Int,
     obstaclesCount: Int,
     catchesCount: Int,
+    allRollers: Boolean,
     onUndo: () -> Unit,
+    onToggleAllRollers: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -442,13 +519,16 @@ private fun FunKeyHeaderCard(
                 }
             }
 
-            // Column 3: Score
+            // Column 3: Score and All Rollers button
             Column(
                 modifier = Modifier.weight(0.8f),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.Center
             ) {
-                Column(horizontalAlignment = Alignment.End) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     // Score on one line
                     Row(
                         horizontalArrangement = Arrangement.End,
@@ -461,6 +541,19 @@ private fun FunKeyHeaderCard(
                             fontWeight = FontWeight.Bold,
                             color = Color.Black
                         )
+                    }
+
+                    // All Rollers button below score
+                    Button(
+                        onClick = onToggleAllRollers,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (allRollers) vSuccess else Color(0xFF757575),
+                            contentColor = if (allRollers) vSuccessOn else Color.White
+                        ),
+                        modifier = Modifier.height(38.dp),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                    ) {
+                        Text("ALL ROLLERS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
             }
@@ -773,60 +866,44 @@ private fun FunKeyFieldCard(
                     JumpCell("jump_2pts_right", "Jump 2 PTS", jump2bCount, isPurpleEnabled) { onJump(2, "JUMP2B") }
                 }
             } else {
-                // Flipped layout - rows become columns
+                // Flipped layout - reverse row and column order
+                // Row 3 (now Row 1): Jump2b, Key3, Tunnel, Key4, Jump2
                 Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Column 1: Jump3, Empty, Jump2
-                    Column(
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        JumpCell("jump_3pts_left", "Jump 3 PTS", jump3Count, isPurpleEnabled) { onJump(3, "JUMP3") }
-                        GreyCell()
-                        JumpCell("jump_2pts_left", "Jump 2 PTS", jump2Count, isPurpleEnabled) { onJump(2, "JUMP2") }
-                    }
+                    JumpCell("jump_2pts_right", "Jump 2 PTS", jump2bCount, isPurpleEnabled) { onJump(2, "JUMP2B") }
+                    KeyCell("3", 3, key3Count, isBlueEnabled, activatedKeys.contains("KEY3")) { onKey(3, "KEY3") }
+                    JumpCell("tunnel", "Tunnel 1 PTS", tunnelCount, isPurpleEnabled) { onJump(0, "TUNNEL") }
+                    KeyCell("4", 4, key4Count, isBlueEnabled, activatedKeys.contains("KEY4")) { onKey(4, "KEY4") }
+                    JumpCell("jump_2pts_left", "Jump 2 PTS", jump2Count, isPurpleEnabled) { onJump(2, "JUMP2") }
+                }
 
-                    // Column 2: Key1, Empty, Key4
-                    Column(
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        KeyCell("1", 1, key1Count, isBlueEnabled, activatedKeys.contains("KEY1")) { onKey(1, "KEY1") }
-                        GreyCell()
-                        KeyCell("4", 4, key4Count, isBlueEnabled, activatedKeys.contains("KEY4")) { onKey(4, "KEY4") }
-                    }
+                // Row 2 (stays Row 2): Empty, Empty, Sweet Spot, Empty, Empty (reversed)
+                Row(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GreyCell()
+                    GreyCell()
+                    SweetSpotCell(sweetSpotOn, onSweetSpot)
+                    GreyCell()
+                    GreyCell()
+                }
 
-                    // Column 3: Jump1, Sweet Spot, Tunnel
-                    Column(
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        JumpCell("jump_1pt", "Jump 1 PTS", jump1Count, isPurpleEnabled) { onJump(1, "JUMP1") }
-                        SweetSpotCell(sweetSpotOn, onSweetSpot)
-                        JumpCell("tunnel", "Tunnel 1 PTS", tunnelCount, isPurpleEnabled) { onJump(0, "TUNNEL") }
-                    }
-
-                    // Column 4: Key2, Empty, Key3
-                    Column(
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        KeyCell("2", 2, key2Count, isBlueEnabled, activatedKeys.contains("KEY2")) { onKey(2, "KEY2") }
-                        GreyCell()
-                        KeyCell("3", 3, key3Count, isBlueEnabled, activatedKeys.contains("KEY3")) { onKey(3, "KEY3") }
-                    }
-
-                    // Column 5: Jump3b, Empty, Jump2b
-                    Column(
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        JumpCell("jump_3pts_right", "Jump 3 PTS", jump3bCount, isPurpleEnabled) { onJump(3, "JUMP3B") }
-                        GreyCell()
-                        JumpCell("jump_2pts_right", "Jump 2 PTS", jump2bCount, isPurpleEnabled) { onJump(2, "JUMP2B") }
-                    }
+                // Row 1 (now Row 3): Jump3b, Key2, Jump1, Key1, Jump3
+                Row(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    JumpCell("jump_3pts_right", "Jump 3 PTS", jump3bCount, isPurpleEnabled) { onJump(3, "JUMP3B") }
+                    KeyCell("2", 2, key2Count, isBlueEnabled, activatedKeys.contains("KEY2")) { onKey(2, "KEY2") }
+                    JumpCell("jump_1pt", "Jump 1 PTS", jump1Count, isPurpleEnabled) { onJump(1, "JUMP1") }
+                    KeyCell("1", 1, key1Count, isBlueEnabled, activatedKeys.contains("KEY1")) { onKey(1, "KEY1") }
+                    JumpCell("jump_3pts_left", "Jump 3 PTS", jump3Count, isPurpleEnabled) { onJump(3, "JUMP3") }
                 }
             }
         }
@@ -1011,130 +1088,63 @@ private fun exportParticipants(
     exporter.save("FunKeyParticipants.csv", csv.encodeToByteArray())
 }
 
-// ColumnScope versions for flipped layout
-@Composable
-private fun ColumnScope.JumpCell(imageName: String, pointsText: String, count: Int, enabled: Boolean, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        colors = ButtonDefaults.buttonColors(
-            backgroundColor = if (enabled) Color(0xFFF500A1) else Color(0xFFE0E0E0),
-            contentColor = if (enabled) Color.White else Color(0xFF9E9E9E),
-            disabledBackgroundColor = Color(0xFFE0E0E0),
-            disabledContentColor = Color(0xFF9E9E9E)
-        ),
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxWidth()
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = pointsText,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                fontSize = 14.sp
-            )
-            if (count > 0) {
-                Text(
-                    text = "[$count]",
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    fontSize = 12.sp,
-                    color = if (enabled) Color.White else Color(0xFF9E9E9E)
-                )
-            }
-        }
-    }
-}
 
-@Composable
-private fun ColumnScope.KeyCell(
-    label: String,
-    points: Int,
-    count: Int,
-    enabled: Boolean,
-    isActivated: Boolean,
-    onClick: () -> Unit
+private suspend fun exportToExcel(
+    assetLoader: AssetLoader,
+    fileExporter: FileExporter,
+    completed: List<FunKeyCompletedParticipant>
 ) {
-    Button(
-        onClick = onClick,
-        enabled = enabled && !isActivated,
-        colors = ButtonDefaults.buttonColors(
-            backgroundColor = when {
-                isActivated -> vSuccess
-                enabled -> Color(0xFFF500A1)
-                else -> Color(0xFFE0E0E0)
-            },
-            contentColor = when {
-                isActivated -> vSuccessOn
-                enabled -> Color.White
-                else -> Color(0xFF9E9E9E)
-            },
-            disabledBackgroundColor = when {
-                isActivated -> vSuccess
-                else -> Color(0xFFE0E0E0)
-            },
-            disabledContentColor = when {
-                isActivated -> vSuccessOn
-                else -> Color(0xFF9E9E9E)
-            }
-        ),
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxWidth()
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = label,
-                fontWeight = FontWeight.Bold,
-                fontSize = 48.sp
-            )
-            Text(
-                text = "$points PT",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
+    val templateBytes = assetLoader.load("templates/UDC FunKey Data Entry Level 2.xlsm")
+    if (templateBytes == null || templateBytes.isEmpty()) {
+        println("Failed to load FunKey template")
+        return
     }
-}
 
-@Composable
-private fun ColumnScope.SweetSpotCell(sweetSpotOn: Boolean, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            backgroundColor = if (sweetSpotOn) vSuccess else vPrimary,
-            contentColor = if (sweetSpotOn) vSuccessOn else vPrimaryOn
-        ),
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxWidth()
-    ) {
-        Text("SWEET\nSPOT", textAlign = TextAlign.Center, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-    }
-}
+    // Sort participants by score (descending), then by tiebreakers (4pt, 3pt, 2pt, 1pt clicks - all descending)
+    val sortedCompleted = completed.sortedWith(
+        compareByDescending<FunKeyCompletedParticipant> { it.score }
+            .thenByDescending { it.roundData.fourPointClicks }
+            .thenByDescending { it.roundData.threePointClicks }
+            .thenByDescending { it.roundData.twoPointClicks }
+            .thenByDescending { it.roundData.onePointClicks }
+    )
 
-@Composable
-private fun ColumnScope.GreyCell() {
-    Button(
-        onClick = { /* Inactive */ },
-        enabled = false,
-        colors = ButtonDefaults.buttonColors(
-            backgroundColor = Color(0xFFE0E0E0),
-            contentColor = Color(0xFF9E9E9E),
-            disabledBackgroundColor = Color(0xFFE0E0E0),
-            disabledContentColor = Color(0xFF9E9E9E)
-        ),
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxWidth()
-    ) {
-        Text("")
+    val exportRows = sortedCompleted.map { participant ->
+        FunKeyExportParticipant(
+            handler = participant.handler,
+            dog = participant.dog,
+            utn = participant.utn,
+            jump3Sum = participant.roundData.jump3Sum,
+            jump2Sum = participant.roundData.jump2Sum,
+            jump1TunnelSum = participant.roundData.jump1TunnelSum,
+            onePointClicks = participant.roundData.onePointClicks,
+            twoPointClicks = participant.roundData.twoPointClicks,
+            threePointClicks = participant.roundData.threePointClicks,
+            fourPointClicks = participant.roundData.fourPointClicks,
+            sweetSpot = if (participant.roundData.sweetSpot) "Y" else "N",
+            allRollers = if (participant.roundData.allRollers) "Y" else "N"
+        )
     }
+
+    val bytes = generateFunKeyXlsm(exportRows, templateBytes)
+    if (bytes.isEmpty()) {
+        println("Excel generation failed")
+        return
+    }
+
+    val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+    fun pad(n: Int) = n.toString().padStart(2, '0')
+    val stamp = buildString {
+        append(now.year)
+        append(pad(now.monthNumber))
+        append(pad(now.dayOfMonth))
+        append('_')
+        append(pad(now.hour))
+        append(pad(now.minute))
+        append(pad(now.second))
+    }
+    val fileName = "FunKey_Scores_${stamp}.xlsm"
+
+    fileExporter.save(fileName, bytes)
+    println("Exported ${exportRows.size} teams to $fileName")
 }
