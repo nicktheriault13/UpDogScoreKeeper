@@ -254,6 +254,17 @@ class SevenUpScreenModel : ScreenModel {
         persistState()
     }
 
+    fun clearParticipants() {
+        _uiState.update {
+            it.copy(
+                activeParticipant = null,
+                queue = emptyList(),
+                completed = emptyList()
+            )
+        }
+        persistState()
+    }
+
     fun setManualTime(time: Double) {
         setTimeManually(time.toString())
     }
@@ -327,6 +338,32 @@ class SevenUpScreenModel : ScreenModel {
             _uiState.update { it.copy(rectangleVersion = (it.rectangleVersion + 1) % 11) }
             persistState()
         }
+    }
+
+    fun flipField() {
+        _uiState.update { state ->
+            // When flipping, we need to transform the markedCells coordinates
+            // The grid is 3 rows x 5 cols, and flipping reverses both rows and cols
+            val transformedMarkedCells = state.markedCells.mapKeys { (key, _) ->
+                val parts = key.split(",")
+                if (parts.size == 2) {
+                    val row = parts[0].toIntOrNull() ?: 0
+                    val col = parts[1].toIntOrNull() ?: 0
+                    // Transform coordinates: (row, col) -> (2-row, 4-col) for 3x5 grid
+                    val newRow = 2 - row
+                    val newCol = 4 - col
+                    "$newRow,$newCol"
+                } else {
+                    key // Keep original if format is unexpected
+                }
+            }
+
+            state.copy(
+                isFlipped = !state.isFlipped,
+                markedCells = transformedMarkedCells
+            )
+        }
+        persistState()
     }
 
     private fun normalizeJumpId(label: String): String? {
