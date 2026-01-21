@@ -15,6 +15,16 @@ import kotlinx.coroutines.flow.update
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+
+// Pretty JSON encoder for exports
+private val prettyJson = Json {
+    prettyPrint = true
+    prettyPrintIndent = "  "
+}
 
 enum class BoomScoringButton(val id: String, val label: String, val points: Int) {
     One("1", "1", 1),
@@ -91,6 +101,7 @@ data class BoomUiState(
     val scoreBreakdown: BoomScoreBreakdown = BoomScoreBreakdown(),
     val buttonState: BoomButtonState = BoomButtonState(),
     val sweetSpotActive: Boolean = false,
+    val allRollersActive: Boolean = false,
     val activeParticipant: BoomParticipant? = null,
     val queue: List<BoomParticipant> = emptyList(),
     val completedParticipants: List<BoomParticipant> = emptyList(),
@@ -150,7 +161,46 @@ class BoomScreenModel : ScreenModel {
     private val _timerRunning = MutableStateFlow(false)
     val timerRunning = _timerRunning.asStateFlow()
 
+    // Flow for pending JSON exports
+    private val _pendingJsonExport = MutableStateFlow<PendingExport?>(null)
+    val pendingJsonExport = _pendingJsonExport.asStateFlow()
+
+    data class PendingExport(
+        val filename: String,
+        val content: String
+    )
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
+
+    // Undo functionality
+    private val undoStack = mutableListOf<BoomUiState>()
+    private val maxUndoLevels = 50
+
+    private fun pushUndo() {
+        val currentState = _uiState.value
+        undoStack.add(0, currentState)
+        if (undoStack.size > maxUndoLevels) {
+            undoStack.removeAt(undoStack.size - 1)
+        }
+    }
+
+    fun undo() {
+        if (undoStack.isNotEmpty()) {
+            val previousState = undoStack.removeAt(0)
+            _uiState.value = previousState
+            persistState()
+        }
+    }
+
+    fun toggleAllRollers() {
+        _uiState.update { it.copy(allRollersActive = !it.allRollersActive) }
+        persistState()
+    }
+
     fun handleScoringButtonClick(button: BoomScoringButton) {
+        pushUndo()
         _uiState.update { state ->
             if (button.id in state.buttonState.clickedButtons || button.id !in state.buttonState.enabledButtons) {
                 return@update state
@@ -171,21 +221,21 @@ class BoomScreenModel : ScreenModel {
     }
 
     fun handleBoom() {
+        pushUndo()
         _uiState.update { state ->
             if (state.buttonState.clickedButtons.isEmpty()) return@update state
             val throwPoints = state.buttonState.clickedButtons.sumOf { BoomScoringButton.fromId(it)?.points ?: 0 }
-            val sweetBonus = if (state.sweetSpotActive) 10 else 0
+            // Sweet spot bonus already added when toggled, so don't add it again
             val updatedCounts = state.scoreBreakdown.buttonCounts.toMutableMap()
             state.buttonState.clickedButtons.forEach { id ->
                 updatedCounts[id] = (updatedCounts[id] ?: 0) + 1
             }
             state.copy(
                 scoreBreakdown = state.scoreBreakdown.copy(
-                    totalScore = state.scoreBreakdown.totalScore + throwPoints + sweetBonus,
+                    totalScore = state.scoreBreakdown.totalScore + throwPoints,
                     buttonCounts = updatedCounts,
                     throwsCompleted = state.scoreBreakdown.throwsCompleted + 1,
-                    sweetSpotAwards = state.scoreBreakdown.sweetSpotAwards + if (sweetBonus > 0) 1 else 0,
-                    lastThrowPoints = throwPoints + sweetBonus
+                    lastThrowPoints = throwPoints
                 ),
                 buttonState = BoomButtonState(),
                 sweetSpotActive = false
@@ -195,6 +245,7 @@ class BoomScreenModel : ScreenModel {
     }
 
     fun handleDud() {
+        pushUndo()
         _uiState.update { state ->
             val fiveClicked = state.buttonState.clickedButtons.contains(BoomScoringButton.Five.id)
             val dudScore = if (fiveClicked) 10 else 0
@@ -219,7 +270,20 @@ class BoomScreenModel : ScreenModel {
     }
 
     fun toggleSweetSpot() {
-        _uiState.update { it.copy(sweetSpotActive = !it.sweetSpotActive) }
+        pushUndo()
+        _uiState.update { state ->
+            val newSweetSpotActive = !state.sweetSpotActive
+            val scoreChange = if (newSweetSpotActive) 10 else -10
+            val sweetSpotChange = if (newSweetSpotActive) 1 else -1
+
+            state.copy(
+                sweetSpotActive = newSweetSpotActive,
+                scoreBreakdown = state.scoreBreakdown.copy(
+                    totalScore = state.scoreBreakdown.totalScore + scoreChange,
+                    sweetSpotAwards = state.scoreBreakdown.sweetSpotAwards + sweetSpotChange
+                )
+            )
+        }
         persistState()
     }
 
@@ -235,8 +299,27 @@ class BoomScreenModel : ScreenModel {
     }
 
     fun nextParticipant() {
+        val currentState = _uiState.value
+        val active = currentState.activeParticipant ?: return
+
+        // Export JSON for current participant before moving to next
+        val jsonContent = exportParticipantJson()
+
+        // Generate filename
+        val timestamp = kotlinx.datetime.Clock.System.now().toString()
+            .replace(":", "")
+            .replace("-", "")
+            .replace(".", "")
+            .substring(0, 15) // YYYYMMDDTHHMMSS
+        val handlerName = active.handler.replace(Regex("\\s+"), "")
+        val dogName = active.dog.replace(Regex("\\s+"), "")
+        val filename = "Boom_${handlerName}_${dogName}_${timestamp}.json"
+
+        // Emit the pending export
+        _pendingJsonExport.value = PendingExport(filename, jsonContent)
+
+        // Update state to move to next participant
         _uiState.update { state ->
-            val active = state.activeParticipant ?: return@update state
             val finished = active.copy(stats = BoomParticipantStats.fromScore(state.scoreBreakdown))
             val nextActive = state.queue.firstOrNull()
             val remainingQueue = if (state.queue.isEmpty()) emptyList() else state.queue.drop(1)
@@ -266,28 +349,85 @@ class BoomScreenModel : ScreenModel {
         resetGame() // persistState calls inside resetGame
     }
 
-    fun importParticipantsFromCsv(csvText: String) {
-        val imported = parseCsv(csvText)
-        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn) }
-        applyImportedPlayers(players)
-    }
+    fun previousParticipant() {
+        val state = _uiState.value
+        if (state.completedParticipants.isEmpty()) return
 
-    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
-        val imported = parseXlsx(xlsxData)
-        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn) }
-        applyImportedPlayers(players)
-    }
+        // Get the last completed participant
+        val previousParticipant = state.completedParticipants.last()
+        val remainingCompleted = state.completedParticipants.dropLast(1)
 
-    private fun applyImportedPlayers(players: List<BoomParticipant>) {
-        if (players.isEmpty()) return
+        // Move current active to front of queue (if exists)
+        val newQueue = if (state.activeParticipant != null) {
+            listOf(state.activeParticipant!!) + state.queue
+        } else {
+            state.queue
+        }
+
         _uiState.update {
             it.copy(
-                activeParticipant = players.first(),
-                queue = players.drop(1),
-                completedParticipants = emptyList()
+                activeParticipant = previousParticipant,
+                queue = newQueue,
+                completedParticipants = remainingCompleted,
+                scoreBreakdown = BoomScoreBreakdown(
+                    totalScore = previousParticipant.stats.totalScore,
+                    buttonCounts = previousParticipant.stats.buttonCounts,
+                    throwsCompleted = previousParticipant.stats.throwsCompleted,
+                    duds = previousParticipant.stats.duds,
+                    sweetSpotAwards = previousParticipant.stats.sweetSpotAwards,
+                    lastThrowPoints = 0
+                ),
+                buttonState = BoomButtonState(),
+                sweetSpotActive = false
             )
         }
-        resetGame() // persistState calls inside resetGame
+        persistState()
+    }
+
+    fun importParticipantsFromCsv(csvText: String, addToExisting: Boolean = false) {
+        val imported = parseCsv(csvText)
+        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players, addToExisting)
+    }
+
+    fun importParticipantsFromXlsx(xlsxData: ByteArray, addToExisting: Boolean = false) {
+        val imported = parseXlsx(xlsxData)
+        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn) }
+        applyImportedPlayers(players, addToExisting)
+    }
+
+    private fun applyImportedPlayers(players: List<BoomParticipant>, addToExisting: Boolean) {
+        if (players.isEmpty()) return
+
+        _uiState.update { state ->
+            if (addToExisting) {
+                // Add mode: append to existing queue
+                if (state.activeParticipant == null) {
+                    // No active participant, set first as active and rest as queue
+                    state.copy(
+                        activeParticipant = players.first(),
+                        queue = players.drop(1)
+                    )
+                } else {
+                    // Add all imported players to the end of the queue
+                    state.copy(
+                        queue = state.queue + players
+                    )
+                }
+            } else {
+                // Replace mode: clear and replace everything
+                state.copy(
+                    activeParticipant = players.first(),
+                    queue = players.drop(1),
+                    completedParticipants = emptyList()
+                )
+            }
+        }
+
+        if (!addToExisting) {
+            resetGame() // Only reset game when replacing
+        }
+        persistState()
     }
 
     fun exportParticipantsAsCsv(): String {
@@ -341,6 +481,107 @@ class BoomScreenModel : ScreenModel {
     fun toggleFieldOrientation() {
         _uiState.update { it.copy(isFieldFlipped = !it.isFieldFlipped) }
         persistState()
+    }
+
+    fun addParticipant(handler: String, dog: String, utn: String) {
+        val newParticipant = BoomParticipant(handler, dog, utn)
+        _uiState.update { state ->
+            if (state.activeParticipant == null) {
+                state.copy(activeParticipant = newParticipant)
+            } else {
+                state.copy(queue = state.queue + newParticipant)
+            }
+        }
+        persistState()
+    }
+
+    fun clearParticipants() {
+        _uiState.update { state ->
+            state.copy(
+                activeParticipant = null,
+                queue = emptyList(),
+                completedParticipants = emptyList(),
+                scoreBreakdown = BoomScoreBreakdown(),
+                buttonState = BoomButtonState(),
+                sweetSpotActive = false
+            )
+        }
+        persistState()
+    }
+
+    fun exportLog(): String {
+        val state = _uiState.value
+        return buildString {
+            appendLine("=== Boom Game Log ===")
+            appendLine()
+
+            state.activeParticipant?.let { active ->
+                appendLine("Current Team:")
+                appendLine("  ${active.handler} & ${active.dog} (${active.utn})")
+                appendLine("  Score: ${state.scoreBreakdown.totalScore}")
+                appendLine("  Throws: ${state.scoreBreakdown.throwsCompleted}")
+                appendLine("  Duds: ${state.scoreBreakdown.duds}")
+                appendLine("  Sweet Spots: ${state.scoreBreakdown.sweetSpotAwards}")
+                appendLine()
+            }
+
+            if (state.queue.isNotEmpty()) {
+                appendLine("Waiting (${state.queue.size}):")
+                state.queue.forEach { participant ->
+                    appendLine("  ${participant.handler} & ${participant.dog} (${participant.utn})")
+                }
+                appendLine()
+            }
+
+            if (state.completedParticipants.isNotEmpty()) {
+                appendLine("Completed (${state.completedParticipants.size}):")
+                state.completedParticipants.forEach { participant ->
+                    appendLine("  ${participant.handler} & ${participant.dog} (${participant.utn})")
+                    appendLine("    Score: ${participant.stats.totalScore}, Throws: ${participant.stats.throwsCompleted}, Duds: ${participant.stats.duds}, Sweet Spots: ${participant.stats.sweetSpotAwards}")
+                }
+            }
+        }
+    }
+
+    fun exportParticipantJson(): String {
+        val state = _uiState.value
+        val active = state.activeParticipant ?: return "{}"
+        val stats = BoomParticipantStats.fromScore(state.scoreBreakdown)
+
+        // Get current timestamp in ISO format
+        val timestamp = kotlinx.datetime.Clock.System.now().toString()
+
+        return prettyJson.encodeToString(
+            kotlinx.serialization.json.buildJsonObject {
+                put("gameMode", kotlinx.serialization.json.JsonPrimitive("Boom"))
+                put("exportTimestamp", kotlinx.serialization.json.JsonPrimitive(timestamp))
+
+                putJsonObject("participantData") {
+                    put("handler", kotlinx.serialization.json.JsonPrimitive(active.handler))
+                    put("dog", kotlinx.serialization.json.JsonPrimitive(active.dog))
+                    put("utn", kotlinx.serialization.json.JsonPrimitive(active.utn))
+                    put("completedAt", kotlinx.serialization.json.JsonPrimitive(timestamp))
+                }
+
+                putJsonObject("roundResults") {
+                    put("1", kotlinx.serialization.json.JsonPrimitive(stats.buttonCounts["1"] ?: 0))
+                    put("2a", kotlinx.serialization.json.JsonPrimitive(stats.buttonCounts["2a"] ?: 0))
+                    put("2b", kotlinx.serialization.json.JsonPrimitive(stats.buttonCounts["2b"] ?: 0))
+                    put("5", kotlinx.serialization.json.JsonPrimitive(stats.buttonCounts["5"] ?: 0))
+                    put("10", kotlinx.serialization.json.JsonPrimitive(stats.buttonCounts["10"] ?: 0))
+                    put("20", kotlinx.serialization.json.JsonPrimitive(stats.buttonCounts["20"] ?: 0))
+                    put("25", kotlinx.serialization.json.JsonPrimitive(stats.buttonCounts["25"] ?: 0))
+                    put("35", kotlinx.serialization.json.JsonPrimitive(stats.buttonCounts["35"] ?: 0))
+                    put("sweetSpot", kotlinx.serialization.json.JsonPrimitive(if (stats.sweetSpotAwards > 0) "Yes" else "No"))
+                    put("totalScore", kotlinx.serialization.json.JsonPrimitive(stats.totalScore))
+                }
+
+                // Empty round log array (matching React structure but not implementing full log tracking yet)
+                putJsonArray("roundLog") {
+                    // Could be populated with log entries if needed
+                }
+            }
+        )
     }
 
     private fun importSampleParticipants() {
