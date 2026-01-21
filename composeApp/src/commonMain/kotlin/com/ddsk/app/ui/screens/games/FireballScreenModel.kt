@@ -93,6 +93,13 @@ class FireballScreenModel : ScreenModel {
     private val _totalScore = MutableStateFlow(0)
     val totalScore: StateFlow<Int> = _totalScore.asStateFlow()
 
+    // Current board's regular and fireball points (live updates during gameplay)
+    private val _currentBoardRegularPoints = MutableStateFlow(0)
+    val currentBoardRegularPoints: StateFlow<Int> = _currentBoardRegularPoints.asStateFlow()
+
+    private val _currentBoardFireballPoints = MutableStateFlow(0)
+    val currentBoardFireballPoints: StateFlow<Int> = _currentBoardFireballPoints.asStateFlow()
+
     // Timer
     private val _timerSecondsRemaining = MutableStateFlow(0)
     val timerSecondsRemaining: StateFlow<Int> = _timerSecondsRemaining.asStateFlow()
@@ -256,15 +263,17 @@ class FireballScreenModel : ScreenModel {
 
     fun clearBoard() {
         logEvent("Clear Board")
-        clearBoardInternal()
+        clearBoardInternal(resetFireballMode = true)
         recomputeScores()
         persistState()
     }
 
-    private fun clearBoardInternal() {
+    private fun clearBoardInternal(resetFireballMode: Boolean = true) {
         _clickedZones.value = emptySet()
         _fireballZones.value = emptySet()
-        _isFireballActive.value = false
+        if (resetFireballMode) {
+            _isFireballActive.value = false
+        }
         _sweetSpotBonusAwarded.value = false
     }
 
@@ -362,7 +371,7 @@ class FireballScreenModel : ScreenModel {
 
         _activeParticipant.value = updated
 
-        clearBoardInternal()
+        clearBoardInternal(resetFireballMode = false) // Preserve fireball mode for next board
         recomputeScores()
         sidebarMessage.value = "Board complete"
         persistState()
@@ -428,6 +437,10 @@ class FireballScreenModel : ScreenModel {
         // UI scores reflect completed boards + current board + sweet spot
         _currentBoardScore.value = board.totalPoints + sweetSpot
         _totalScore.value = completedBoardsTotal + board.totalPoints + sweetSpot
+
+        // Update cumulative regular and fireball points (completed + current board)
+        _currentBoardRegularPoints.value = (participant?.nonFireballPoints ?: 0) + board.nonFireballPoints
+        _currentBoardFireballPoints.value = (participant?.fireballPoints ?: 0) + board.fireballPoints
 
         // IMPORTANT: do NOT mutate participant nonFireball/fireball/total/highest here.
         // Those are persisted totals and are committed only on board completion or Next().

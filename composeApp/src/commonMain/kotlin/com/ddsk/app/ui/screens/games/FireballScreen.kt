@@ -53,6 +53,8 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.persistence.*
 import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.theme.Palette
+import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
+import com.ddsk.app.media.rememberAudioPlayer
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
@@ -70,6 +72,8 @@ object FireballScreen : Screen {
 
         val totalScore by screenModel.totalScore.collectAsState()
         val currentBoardScore by screenModel.currentBoardScore.collectAsState()
+        val currentBoardRegularPoints by screenModel.currentBoardRegularPoints.collectAsState()
+        val currentBoardFireballPoints by screenModel.currentBoardFireballPoints.collectAsState()
         val isFieldFlipped by screenModel.isFieldFlipped.collectAsState()
         val timerSecondsRemaining by screenModel.timerSecondsRemaining.collectAsState()
         val isTimerRunning by screenModel.isTimerRunning.collectAsState()
@@ -78,8 +82,6 @@ object FireballScreen : Screen {
         val allRollersActive by screenModel.allRollersActive.collectAsState()
         val isFireballActive by screenModel.isFireballActive.collectAsState()
         val sweetSpotBonusAwarded by screenModel.sweetSpotBonusAwarded.collectAsState()
-        val sidebarCollapsed by screenModel.sidebarCollapsed.collectAsState()
-        val sidebarMessage by screenModel.sidebarMessage.collectAsState()
         val completedParticipants by screenModel.completedParticipants.collectAsState()
 
         val remainingParticipants = participantsQueue.filterNot { participant ->
@@ -91,10 +93,40 @@ object FireballScreen : Screen {
         }
 
         var showClearParticipantsDialog by remember { mutableStateOf(false) }
+        var showResetRoundDialog by remember { mutableStateOf(false) }
+        var showAddTeamDialog by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
         val fileExporter = rememberFileExporter()
         val assetLoader = rememberAssetLoader()
+
+        // Track when to select a new random audio file (increments each time timer starts)
+        var audioSelectionKey by remember { mutableStateOf(0) }
+
+        // Audio player for timer - randomly selects one of 6 fireball timer audio files
+        // The key ensures a new random file is selected each time the timer starts
+        val currentAudioFileName = remember(audioSelectionKey) { getTimerAssetForGame("Fire Ball") }
+        val audioPlayer = rememberAudioPlayer(currentAudioFileName)
+
+        // Extract just the filename from the full path for display
+        val audioDisplayName = remember(currentAudioFileName) {
+            currentAudioFileName.substringAfterLast("/").substringBeforeLast(".")
+        }
+
+        // Track audio player time
+        val currentAudioTime by audioPlayer.currentTime.collectAsState()
+        val audioRemainingSeconds = remember(audioPlayer.duration, currentAudioTime) {
+            (audioPlayer.duration - currentAudioTime) / 1000
+        }
+
+        // Play/stop audio when timer state changes
+        LaunchedEffect(isTimerRunning) {
+            if (isTimerRunning) {
+                audioPlayer.play()
+            } else {
+                audioPlayer.stop()
+            }
+        }
 
         // Hold the latest file import payload until the user chooses Add vs Replace.
         var pendingImport by remember { mutableStateOf<ImportResult?>(null) }
@@ -110,6 +142,7 @@ object FireballScreen : Screen {
             }
         }
 
+        // Import choice dialog
         if (showImportChoiceDialog) {
             AlertDialog(
                 onDismissRequest = {
@@ -169,125 +202,216 @@ object FireballScreen : Screen {
 
         LaunchedEffect(pendingJsonExport) {
             val pending = pendingJsonExport ?: return@LaunchedEffect
-            // Multiplatform: always prompt user to choose a save location where possible.
             saveJsonFileWithPicker(pending.filename, pending.content)
             screenModel.consumePendingJsonExport()
         }
 
-        Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
-            BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                // Home button is rendered inside the header row to avoid overlap.
-
-                Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    HeaderRow(
+        Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Top row: Header card and Timer
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Left: Header card with stats and score
+                    FireballHeaderCard(
                         navigator = navigator,
-                        timerRunning = isTimerRunning,
-                        secondsRemaining = timerSecondsRemaining,
-                        onTimerToggle = {
-                            if (isTimerRunning) screenModel.stopRoundTimer() else screenModel.startRoundTimer(64)
-                        },
                         activeParticipant = activeParticipant,
                         totalScore = totalScore,
                         boardScore = currentBoardScore,
                         onAllRollers = screenModel::toggleAllRollers,
-                        allRollers = allRollersActive,
+                        allRollersActive = allRollersActive,
+                        onClearBoard = screenModel::clearBoard,
+                        onToggleFireball = screenModel::toggleFireball,
+                        isFireballActive = isFireballActive,
+                        onToggleSweetSpot = screenModel::toggleManualSweetSpot,
+                        sweetSpotActive = sweetSpotBonusAwarded,
+                        regularPoints = currentBoardRegularPoints,
+                        fireballPoints = currentBoardFireballPoints,
+                        modifier = Modifier.weight(2f).fillMaxHeight()
                     )
 
-                    Spacer(Modifier.height(16.dp))
+                    // Right: Timer card
+                    FireballTimerCard(
+                        timerRunning = isTimerRunning,
+                        secondsRemaining = audioRemainingSeconds,
+                        audioFileName = audioDisplayName,
+                        onStartStop = {
+                            if (isTimerRunning) {
+                                screenModel.stopRoundTimer()
+                            } else {
+                                // Increment audioSelectionKey to select a new random audio file
+                                audioSelectionKey++
+                                screenModel.startRoundTimer(64)
+                            }
+                        },
+                        modifier = Modifier.weight(1f).fillMaxWidth()
+                    )
+                }
 
-                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                        val spacing = 12.dp
-                        val sidebarWidth = if (sidebarCollapsed) 68.dp else 190.dp
-                        val participantWidth = 220.dp
-                        val minFieldWidth = 260.dp
-                        val availableFieldWidth = (maxWidth - sidebarWidth - participantWidth - spacing * 2).coerceAtLeast(minFieldWidth)
-                        val fieldHeight = (availableFieldWidth / 1.8f).coerceAtLeast(340.dp)
+                // Middle row: Main game grid and Team Management
+                Row(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Main grid (center)
+                    FireballScoringGrid(
+                        screenModel = screenModel,
+                        isFieldFlipped = isFieldFlipped,
+                        isFireballActive = isFireballActive,
+                        sweetSpotActive = sweetSpotBonusAwarded,
+                        modifier = Modifier.weight(1f)
+                    )
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(spacing),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            SidebarColumn(
-                                collapsed = sidebarCollapsed,
-                                onToggle = screenModel::toggleSidebar,
-                                onImport = { filePicker.launch() },
-                                onExport = {
-                                    scope.launch {
-                                        val templateBytes = assetLoader.load("templates/UDC Fireball Data Entry L1 Div Sort.xlsx")
-                                        if (templateBytes == null) {
-                                            screenModel.sidebarMessage.value = "Template missing: UDC Fireball Data Entry L1 Div Sort.xlsx"
-                                            return@launch
-                                        }
+                    // Right side: Queue and Team Management
+                    Column(
+                        modifier = Modifier.weight(0.3f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Queue card showing teams in queue
+                        FireballQueueCard(
+                            participants = remainingParticipants,
+                            modifier = Modifier.weight(1f)
+                        )
 
-                                        // React behavior: export committed participant totals (completed rounds).
-                                        // Active participant may have in-progress board state and should not be included unless
-                                        // the user has advanced with Next (which commits and adds to completedParticipants).
-                                        val participants = completedParticipants
-
-                                        if (participants.isEmpty()) {
-                                            screenModel.sidebarMessage.value = "Export: no completed participants yet (press Next to commit a round)"
-                                            return@launch
-                                        }
-
-                                        val firstNonZero = participants.firstOrNull {
-                                            it.totalPoints != 0 || it.nonFireballPoints != 0 || it.fireballPoints != 0 || (it.highestZone ?: 0) != 0
-                                        }
-                                        screenModel.sidebarMessage.value = if (firstNonZero == null) {
-                                            "Export debug: completed participants still look zero (count=${participants.size})"
-                                        } else {
-                                            "Export debug (completed): ${firstNonZero.handler}/${firstNonZero.dog} NF=${firstNonZero.nonFireballPoints} FB=${firstNonZero.fireballPoints} SS=${firstNonZero.sweetSpotBonus} HZ=${firstNonZero.highestZone ?: 0} TOT=${firstNonZero.totalPoints}"
-                                        }
-
-                                        val exported = generateFireballXlsx(participants, templateBytes)
-                                        if (exported.isEmpty()) {
-                                            screenModel.sidebarMessage.value = "Export failed"
-                                            return@launch
-                                        }
-
-                                        val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-                                        val stamp = fireballTimestamp(now)
-
-                                        fileExporter.save("Fireball_Scores_$stamp.xlsx", exported)
-                                        screenModel.sidebarMessage.value = "Exported Fireball_Scores_$stamp.xlsx"
+                        // Team Management section
+                        FireballTeamManagementCard(
+                            onClearTeams = { showClearParticipantsDialog = true },
+                            onImport = { filePicker.launch() },
+                            onAddTeam = { showAddTeamDialog = true },
+                            onExport = {
+                                scope.launch {
+                                    val templateBytes = assetLoader.load("templates/UDC Fireball Data Entry L1 Div Sort.xlsx")
+                                    if (templateBytes == null) {
+                                        println("Template missing: UDC Fireball Data Entry L1 Div Sort.xlsx")
+                                        return@launch
                                     }
-                                },
-                                onHelp = screenModel::openHelp,
-                                onClearBoard = screenModel::clearBoard,
-                                onResetGame = screenModel::resetGame,
-                                onFlipField = screenModel::toggleFieldOrientation,
-                                onToggleFireball = screenModel::toggleFireball,
-                                onToggleSweetSpot = screenModel::toggleManualSweetSpot,
-                                onNext = screenModel::nextParticipant,
-                                onSkip = screenModel::skipParticipant,
-                                onAddTeam = { screenModel.addParticipant(FireballParticipant("New", "Dog", "UTN")) },
-                                collapsedMessage = sidebarMessage,
-                                isFireballActive = isFireballActive,
-                                sweetSpotActive = sweetSpotBonusAwarded,
-                                remainingCount = remainingParticipants.size,
-                                onCollapseRequested = screenModel::toggleSidebar
-                            )
 
-                            ParticipantPanel(
-                                remaining = remainingParticipants,
-                                height = fieldHeight,
-                            )
+                                    val participants = completedParticipants
+                                    if (participants.isEmpty()) {
+                                        println("Export: no completed participants yet (press Next to commit a round)")
+                                        return@launch
+                                    }
 
-                            FieldAndControls(
-                                screenModel = screenModel,
-                                isFieldFlipped = isFieldFlipped,
-                                isFireballActive = isFireballActive,
-                                sweetSpotActive = sweetSpotBonusAwarded,
-                                modifier = Modifier
-                                    .width(availableFieldWidth)
-                                    .height(fieldHeight)
-                            )
+                                    val exported = generateFireballXlsx(participants, templateBytes)
+                                    if (exported.isEmpty()) {
+                                        println("Export failed")
+                                        return@launch
+                                    }
+
+                                    val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                    val stamp = fireballTimestamp(now)
+
+                                    fileExporter.save("Fireball_Scores_$stamp.xlsx", exported)
+                                    println("Exported Fireball_Scores_$stamp.xlsx")
+                                }
+                            },
+                            onResetRound = { showResetRoundDialog = true },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // Bottom row - Navigation buttons aligned below the grid
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Navigation buttons below the scoring grid
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = screenModel::toggleFieldOrientation,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("⇄ FLIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = { /* TODO: Add previous participant function */ },
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("◄ PREV", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = screenModel::nextParticipant,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("► NEXT", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = screenModel::skipParticipant,
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF6750A4),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("►► SKIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
                         }
                     }
+
+                    // Empty spacer to align with right column
+                    Spacer(modifier = Modifier.weight(0.3f))
                 }
             }
         }
 
+        // Add Team Dialog
+        if (showAddTeamDialog) {
+            FireballAddParticipantDialog(
+                onDismiss = { showAddTeamDialog = false },
+                onAdd = { handler, dog, utn ->
+                    screenModel.addParticipant(FireballParticipant(handler, dog, utn))
+                    showAddTeamDialog = false
+                }
+            )
+        }
+
+        // Clear Teams Dialog
         if (showClearParticipantsDialog) {
             AlertDialog(
                 onDismissRequest = { showClearParticipantsDialog = false },
@@ -304,261 +428,218 @@ object FireballScreen : Screen {
                 }
             )
         }
+
+        // Reset Round Dialog
+        if (showResetRoundDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetRoundDialog = false },
+                title = { Text("Reset Round?") },
+                text = { Text("Are you sure you want to reset the round? This will clear the current score and progress.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            screenModel.resetGame()
+                            showResetRoundDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = Color(0xFFD50000),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Reset")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showResetRoundDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
     }
 }
 
 @Composable
-private fun HeaderRow(
+private fun FireballHeaderCard(
     navigator: cafe.adriel.voyager.navigator.Navigator,
-    timerRunning: Boolean,
-    secondsRemaining: Int,
-    onTimerToggle: () -> Unit,
     activeParticipant: FireballParticipant?,
     totalScore: Int,
     boardScore: Int,
     onAllRollers: () -> Unit,
-    allRollers: Boolean,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            GameHomeButton(navigator = navigator)
-            Column {
-                Text("Fire Ball", style = MaterialTheme.typography.h5, color = Palette.onSurface)
-                Text("Total Score: $totalScore", style = MaterialTheme.typography.subtitle1, color = Palette.onSurfaceVariant)
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = onTimerToggle,
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = if (timerRunning) Palette.error else Palette.info,
-                    contentColor = Color.White
-                )
-            ) {
-                Text(if (timerRunning) "Stop (${secondsRemaining}s)" else "Start Timer")
-            }
-            Box(
-                modifier = Modifier
-                    .width(120.dp)
-                    .height(10.dp)
-                    .border(1.dp, Palette.outlineVariant, RoundedCornerShape(4.dp))
-            ) {
-                val pct = (secondsRemaining / 64f).coerceIn(0f, 1f)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(pct)
-                        .height(10.dp)
-                        .background(Palette.primaryContainer, RoundedCornerShape(4.dp))
-                )
-            }
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text("Active:", style = MaterialTheme.typography.caption, color = Palette.onBackground)
-            Text(
-                activeParticipant?.let { "${it.handler} & ${it.dog}" } ?: "No team loaded",
-                style = MaterialTheme.typography.body1,
-                color = Palette.onSurface
-            )
-            Text("Board: $boardScore", style = MaterialTheme.typography.caption, color = Palette.onBackground)
-        }
-        Button(
-            onClick = onAllRollers,
-            colors = ButtonDefaults.buttonColors(
-                backgroundColor = if (allRollers) Palette.success else Palette.primary,
-                contentColor = Palette.onPrimary
-            )
-        ) {
-            Text("All Rollers")
-        }
-    }
-}
-
-@Composable
-private fun SidebarColumn(
-    collapsed: Boolean,
-    onToggle: () -> Unit,
-    onImport: () -> Unit,
-    onExport: () -> Unit,
-    onHelp: () -> Unit,
+    allRollersActive: Boolean,
     onClearBoard: () -> Unit,
-    onResetGame: () -> Unit,
-    onFlipField: () -> Unit,
     onToggleFireball: () -> Unit,
-    onToggleSweetSpot: () -> Unit,
-    onNext: () -> Unit,
-    onSkip: () -> Unit,
-    onAddTeam: () -> Unit,
-    collapsedMessage: String,
     isFireballActive: Boolean,
+    onToggleSweetSpot: () -> Unit,
     sweetSpotActive: Boolean,
-    remainingCount: Int,
-    onCollapseRequested: () -> Unit,
+    regularPoints: Int,
+    fireballPoints: Int,
+    modifier: Modifier = Modifier
 ) {
     Card(
         shape = RoundedCornerShape(12.dp),
-        backgroundColor = Palette.surfaceContainer,
-        elevation = 6.dp,
-        modifier = Modifier
-            .width(if (collapsed) 68.dp else 190.dp)
-            .padding(vertical = 2.dp)
+        elevation = 4.dp,
+        modifier = modifier
     ) {
-        if (collapsed) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Column 1: Home button, game title, active team, and Clear Board button
             Column(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .padding(vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Top
+                verticalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxHeight()
             ) {
-                TextButton(onClick = onToggle, modifier = Modifier.padding(0.dp)) {
-                    Text("☰", fontWeight = FontWeight.Bold, fontSize = 22.sp)
-                }
-                Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = onCollapseRequested,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.primary, contentColor = Palette.onPrimary),
-                    modifier = Modifier.padding(horizontal = 8.dp)
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(text = "Expand")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GameHomeButton(navigator = navigator)
+                        Text(
+                            text = "Fire Ball",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = activeParticipant?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
+                        fontSize = 13.sp,
+                        color = Color.DarkGray
+                    )
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    collapsedMessage,
-                    style = MaterialTheme.typography.caption,
-                    color = Palette.onSurfaceVariant,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis
-                )
+
+                // Undo button at bottom of this column
+                Button(
+                    onClick = onClearBoard, // Will be changed to onUndo
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFFFF9100),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.height(38.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("UNDO", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
             }
-        } else {
+
+            // Column 2: Points display and Fireball/Sweet Spot buttons
             Column(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .padding(8.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Top
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                TextButton(onClick = onToggle, modifier = Modifier.align(Alignment.End)) {
-                    Text("Hide", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                // Points display
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Regular:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.DarkGray
+                        )
+                        Text(
+                            text = regularPoints.toString(),
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF2979FF)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Fireball:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.DarkGray
+                        )
+                        Text(
+                            text = fireballPoints.toString(),
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFF9100)
+                        )
+                    }
                 }
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onImport,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.info, contentColor = Palette.onInfo),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Import") }
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onExport,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.info, contentColor = Palette.onInfo),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Export") }
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onHelp,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.primaryContainer, contentColor = Palette.onPrimaryContainer),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Help") }
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
-                Button(
-                    onClick = onClearBoard,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.tertiary, contentColor = Palette.onTertiary),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Clear Board") }
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onResetGame,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.error, contentColor = Palette.onError),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Reset Game") }
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onFlipField,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.primary, contentColor = Palette.onPrimary),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Flip Field") }
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                // Fireball button (tall, centered)
                 Button(
                     onClick = onToggleFireball,
                     colors = ButtonDefaults.buttonColors(
-                        backgroundColor = if (isFireballActive) Palette.warning else Palette.primary,
-                        contentColor = if (isFireballActive) Palette.onWarning else Palette.onPrimary
+                        backgroundColor = if (isFireballActive) Color(0xFFFF9100) else Color(0xFF757575),
+                        contentColor = Color.White
                     ),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Fireball Mode") }
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
-                Button(
-                    onClick = onNext,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.primary, contentColor = Palette.onPrimary),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Next") }
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onSkip,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.tertiary, contentColor = Palette.onTertiary),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Skip") }
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onAddTeam,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Palette.info, contentColor = Palette.onInfo),
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Add Team") }
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
-                Text(
-                    "Remaining: $remainingCount",
-                    style = MaterialTheme.typography.caption,
-                    color = Palette.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
+                    modifier = Modifier.fillMaxWidth(0.85f).height(72.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("🔥 FIREBALL", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
             }
-        }
-    }
-}
 
-@Composable
-private fun ParticipantPanel(
-    remaining: List<FireballParticipant>,
-    height: Dp,
-) {
-    Card(
-        shape = RoundedCornerShape(12.dp),
-        backgroundColor = Palette.surfaceContainer,
-        elevation = 6.dp,
-        modifier = Modifier
-            .width(220.dp)
-            .height(height)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp)
-        ) {
-            Text(
-                "Remaining (${remaining.size})",
-                style = MaterialTheme.typography.subtitle2,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-                color = Palette.onSurface
-            )
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(remaining, key = { "${it.handler}-${it.dog}-${it.utn}" }) { participant ->
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(participant.handler, fontWeight = FontWeight.Bold, color = Palette.onSurface)
-                        Text(participant.dog, style = MaterialTheme.typography.body2, color = Palette.onSurfaceVariant)
-                        Text("UTN: ${participant.utn}", style = MaterialTheme.typography.caption, color = Palette.onSurfaceVariant)
+            // Column 3: Total Score, All Rollers, and Sweet Spot buttons
+            Column(
+                modifier = Modifier.weight(0.8f),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Score on one line
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text("Total: ", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = totalScore.toString(),
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
                     }
-                    Divider()
+
+                    // All Rollers button
+                    Button(
+                        onClick = onAllRollers,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (allRollersActive) Color(0xFF00C853) else Color(0xFF757575),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.height(38.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("ALL ROLLERS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+
+                    // Sweet Spot button below All Rollers
+                    Button(
+                        onClick = onToggleSweetSpot,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (sweetSpotActive) Color(0xFF00C853) else Color(0xFF757575),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.height(38.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("SWEET SPOT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
                 }
             }
         }
@@ -566,91 +647,315 @@ private fun ParticipantPanel(
 }
 
 @Composable
-private fun FieldAndControls(
-    screenModel: FireballScreenModel,
-    isFieldFlipped: Boolean,
-    isFireballActive: Boolean,
-    sweetSpotActive: Boolean,
+private fun FireballTimerCard(
+    timerRunning: Boolean,
+    secondsRemaining: Int,
+    audioFileName: String,
+    onStartStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        FireballGrid(screenModel, isFieldFlipped, Modifier.weight(1f, fill = true).fillMaxWidth())
-        Spacer(Modifier.height(12.dp))
-        Button(
-            onClick = screenModel::toggleManualSweetSpot,
-            colors = ButtonDefaults.buttonColors(
-                backgroundColor = if (sweetSpotActive) Palette.success else Palette.info,
-                contentColor = if (sweetSpotActive) Palette.onSuccess else Palette.onInfo
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(text = if (sweetSpotActive) "Sweet Spot Bonus (On)" else "Sweet Spot Bonus", fontWeight = FontWeight.Bold)
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Top row: TIMER and PAUSE buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { if (!timerRunning) onStartStop() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("▶", fontSize = 16.sp)
+                        Text("TIMER", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { if (timerRunning) onStartStop() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⏸", fontSize = 16.sp)
+                        Text("PAUSE", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Audio filename display
+            Text(
+                text = audioFileName,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.DarkGray,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // Timer display
+            Box(
+                modifier = Modifier.fillMaxWidth().height(60.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "${secondsRemaining}s",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (timerRunning) Color(0xFFFF9100) else Color.Black
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun FireballGrid(
+private fun FireballQueueCard(
+    participants: List<FireballParticipant>,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth().fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                "Queue",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+
+            // Display teams in queue - scrollable list that fills available space
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (participants.isEmpty()) {
+                    item {
+                        Text(
+                            "No teams in queue",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                } else {
+                    items(count = participants.size) { index ->
+                        val participant = participants[index]
+                        val isCurrentTeam = index == 0
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = if (isCurrentTeam) Color(0xFFE3F2FD) else Color.White,
+                            elevation = if (isCurrentTeam) 2.dp else 0.dp,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                horizontalArrangement = Arrangement.Start,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (isCurrentTeam) "▶ ${participant.handler} & ${participant.dog}"
+                                           else "${participant.handler} & ${participant.dog}",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isCurrentTeam) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isCurrentTeam) Color(0xFF1976D2) else Color.Black
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FireballTeamManagementCard(
+    onClearTeams: () -> Unit,
+    onImport: () -> Unit,
+    onAddTeam: () -> Unit,
+    onExport: () -> Unit,
+    onResetRound: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onClearTeams,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFF7B1FA2),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("CLEAR TEAMS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onImport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("IMPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onAddTeam,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("ADD TEAM", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onExport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("EXPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Button(
+                onClick = onResetRound,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFFD50000),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("RESET ROUND", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FireballScoringGrid(
     screenModel: FireballScreenModel,
     isFieldFlipped: Boolean,
+    isFireballActive: Boolean,
+    sweetSpotActive: Boolean,
     modifier: Modifier = Modifier
 ) {
     val clickedZones by screenModel.clickedZones.collectAsState()
     val fireballZones by screenModel.fireballZones.collectAsState()
-    val rowIndices = FireballScreenModel.zoneValueGrid.indices.toList()
-    val colIndices = FireballScreenModel.zoneValueGrid.first().indices.toList()
-    val rowOrder = if (isFieldFlipped) rowIndices.reversed() else rowIndices
-    val colOrder = if (isFieldFlipped) colIndices.reversed() else colIndices
 
     Card(
         shape = RoundedCornerShape(18.dp),
-        backgroundColor = Palette.surfaceContainer,
         elevation = 8.dp,
         modifier = modifier.fillMaxSize()
     ) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-            val horizontalSpacing = 8.dp
-            val verticalSpacing = 8.dp
-            val availableHeight = (maxHeight - verticalSpacing * 2).coerceAtLeast(0.dp)
-            val unitHeight = availableHeight / 4f
-            val middleRowHeight = (unitHeight * 2f).coerceAtLeast(96.dp)
-            val compactRowHeight = unitHeight.coerceAtLeast(72.dp)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 3x5 grid layout (matching ThrowNGo structure)
+            // Fireball's 4x3 grid will be in center 3 columns, with empty cells on left and right
 
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(verticalSpacing)
-            ) {
-                rowOrder.forEach { row ->
-                    val rowHeight = if (row == 1) middleRowHeight else compactRowHeight
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(rowHeight),
-                        horizontalArrangement = Arrangement.spacedBy(horizontalSpacing)
-                    ) {
-                        colOrder.forEach { col ->
-                            val zoneValue = FireballScreenModel.zoneValue(row, col)
-                            val point = FireballGridPoint(row, col)
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Palette.surface)
-                                    .border(1.dp, Palette.outlineVariant, RoundedCornerShape(12.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (zoneValue != null) {
-                                    ZoneButton(
-                                        value = zoneValue,
-                                        clicked = clickedZones.contains(point),
-                                        fireball = fireballZones.contains(point),
-                                        onClick = { screenModel.handleZoneClick(row, col) }
-                                    )
+            val fireballRows = FireballScreenModel.zoneValueGrid.indices.toList() // 0,1,2,3
+            val fireballCols = FireballScreenModel.zoneValueGrid.first().indices.toList() // 0,1,2
+
+            val rowOrder = if (isFieldFlipped) fireballRows.reversed() else fireballRows
+            val colOrder = if (isFieldFlipped) fireballCols.reversed() else fireballCols
+
+            // Row weights: rows 0,2,3 are regular height, row 1 (middle) is taller
+            val rowHeights = listOf(1f, 2f, 1f, 1f)
+
+            rowOrder.forEach { fireballRow ->
+                val rowWeight = rowHeights[fireballRow]
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(rowWeight),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 5 columns: empty, fireball, fireball, fireball, empty
+                    for (displayCol in 0..4) {
+                        when (displayCol) {
+                            0, 4 -> {
+                                // Empty cell on left and right edges
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFFE0E0E0)) // Gray empty cell
+                                )
+                            }
+                            1, 2, 3 -> {
+                                // Fireball buttons in center 3 columns
+                                val fireballCol = displayCol - 1 // Map to 0,1,2
+                                val actualCol = if (isFieldFlipped) {
+                                    // When flipped, reverse the center columns
+                                    2 - fireballCol
+                                } else {
+                                    fireballCol
+                                }
+
+                                val zoneValue = FireballScreenModel.zoneValue(fireballRow, actualCol)
+                                val point = FireballGridPoint(fireballRow, actualCol)
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (zoneValue != null) {
+                                        ZoneButton(
+                                            value = zoneValue,
+                                            clicked = clickedZones.contains(point),
+                                            fireball = fireballZones.contains(point),
+                                            onClick = { screenModel.handleZoneClick(fireballRow, actualCol) }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -661,25 +966,82 @@ private fun FireballGrid(
     }
 }
 
-
 @Composable
 private fun ZoneButton(value: Int, clicked: Boolean, fireball: Boolean, onClick: () -> Unit) {
     val colors = when {
-        fireball -> ButtonDefaults.buttonColors(backgroundColor = Palette.warning, contentColor = Palette.onWarning)
-        clicked -> ButtonDefaults.buttonColors(backgroundColor = Palette.success, contentColor = Palette.onSuccess)
-        else -> ButtonDefaults.buttonColors(backgroundColor = Palette.primary, contentColor = Palette.onPrimary)
+        fireball -> ButtonDefaults.buttonColors(
+            backgroundColor = Color(0xFFFF9100), // Orange for fireball
+            contentColor = Color.White
+        )
+        clicked -> ButtonDefaults.buttonColors(
+            backgroundColor = Color(0xFF00C853), // Green for clicked
+            contentColor = Color.White
+        )
+        else -> ButtonDefaults.buttonColors(
+            backgroundColor = Color(0xFFF500A1), // Pink default
+            contentColor = Color.White
+        )
     }
     Button(
         onClick = onClick,
-        // Allow toggling/clearing when Fireball Mode is active.
-        // The screen model itself enforces the rules when Fireball Mode is NOT active.
         enabled = true,
         colors = colors,
-        modifier = Modifier.fillMaxSize().padding(6.dp),
+        modifier = Modifier.fillMaxSize(),
         shape = RoundedCornerShape(12.dp)
     ) {
         Text(value.toString(), fontSize = 28.sp, fontWeight = FontWeight.Bold)
     }
+}
+
+@Composable
+private fun FireballAddParticipantDialog(
+    onDismiss: () -> Unit,
+    onAdd: (handler: String, dog: String, utn: String) -> Unit
+) {
+    var handler by remember { mutableStateOf("") }
+    var dog by remember { mutableStateOf("") }
+    var utn by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Team") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material.OutlinedTextField(
+                    value = handler,
+                    onValueChange = { handler = it },
+                    label = { Text("Handler") },
+                    singleLine = true
+                )
+                androidx.compose.material.OutlinedTextField(
+                    value = dog,
+                    onValueChange = { dog = it },
+                    label = { Text("Dog") },
+                    singleLine = true
+                )
+                androidx.compose.material.OutlinedTextField(
+                    value = utn,
+                    onValueChange = { utn = it },
+                    label = { Text("UTN") },
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (handler.isNotBlank() && dog.isNotBlank() && utn.isNotBlank()) {
+                        onAdd(handler.trim(), dog.trim(), utn.trim())
+                    }
+                }
+            ) { Text("Add") }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 private fun fireballTimestamp(now: kotlinx.datetime.LocalDateTime): String {

@@ -32,12 +32,12 @@ val SharedTimerGames = listOf(
         "Fire Ball",
         RandomAsset(
             listOf(
-                "assets/audio/Fireball Timer 1.mp3",
-                "assets/audio/Fireball Timer 2.mp3",
-                "assets/audio/Fireball Timer 3.mp3",
-                "assets/audio/Fireball Timer 4.mp3",
-                "assets/audio/Fireball Timer 5.mp3",
-                "assets/audio/Fireball Timer 6.mp3"
+                "assets/audio/fireball/Fireball Timer 1.mp3",
+                "assets/audio/fireball/Fireball Timer 2.mp3",
+                "assets/audio/fireball/Fireball Timer 3.mp3",
+                "assets/audio/fireball/Fireball Timer 4.mp3",
+                "assets/audio/fireball/Fireball Timer 5.mp3",
+                "assets/audio/fireball/Fireball Timer 6.mp3"
             )
         )
     ),
