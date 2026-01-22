@@ -86,6 +86,10 @@ object FarOutScreen : Screen {
 
         var textPreview by remember { mutableStateOf<TextPreview?>(null) }
         var showLogDialog by remember { mutableStateOf(false) }
+        var showImportModeDialog by remember { mutableStateOf(false) }
+        var pendingImportResult by remember { mutableStateOf<ImportResult?>(null) }
+        var showResetRoundDialog by remember { mutableStateOf(false) }
+
         val scope = rememberCoroutineScope()
         val gameLogger = rememberGameLogger("FarOut")
         val assetLoader = rememberAssetLoader()
@@ -99,12 +103,12 @@ object FarOutScreen : Screen {
 
         val fileExporter = rememberFileExporter()
         val filePicker = rememberFilePicker { result ->
-            scope.launch {
-                when (result) {
-                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents)
-                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes)
-                    else -> {}
+            when (result) {
+                is ImportResult.Csv, is ImportResult.Xlsx -> {
+                    pendingImportResult = result
+                    showImportModeDialog = true
                 }
+                else -> {}
             }
         }
 
@@ -119,140 +123,210 @@ object FarOutScreen : Screen {
             }
         }
 
-        Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
+        Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
             Box(modifier = Modifier.fillMaxSize()) {
-                // Home button is rendered inside the header to avoid overlap.
-
-                Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    FarOutHeader(
-                        navigator = navigator,
-                        activeName = activeParticipant?.displayName().orEmpty().ifBlank { "No team loaded" },
-                        score = state.score,
-                        timer = state.timerDisplay,
-                        onStartTimer = {
-                            logButtonPress("Start Timer")
-                            screenModel.startTimer()
-                        },
-                        onPauseTimer = {
-                            logButtonPress("Pause Timer")
-                            screenModel.pauseOrResumeTimer()
-                        },
-                        onStopTimer = {
-                            logButtonPress("Stop Timer")
-                            screenModel.stopTimer()
-                        },
-                        onBack = {
-                            logButtonPress("Back")
-                            navigator.pop()
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        FarOutSidebar(
-                            timerLabel = state.timerDisplay.secondsRemaining,
-                            onImport = {
-                                logButtonPress("Import")
-                                filePicker.launch()
-                            },
-                            onExport = {
-                                scope.launch {
-                                    logButtonPress("Export")
-                                    val templatePath = "templates/UDC FarOut Data Entry L1 Div Sort 1-2025.xlsm"
-                                    val templateBytes = try {
-                                        assetLoader.load(templatePath)
-                                    } catch (e: Exception) {
-                                        null
-                                    }
-
-                                    val result = try {
-                                        screenModel.exportParticipantsAsXlsx(templateBytes)
-                                    } catch (e: Exception) {
-                                        gameLogger.log("Export exception: ${e.message}")
-                                        null
-                                    }
-
-                                    if (result != null) {
-                                        fileExporter.save(result.fileName, result.data)
-                                        gameLogger.log("Export initiated: ${result.fileName}")
-                                    } else {
-                                        gameLogger.log("Export failed: missing template or data generation error")
-                                    }
-                                }
-                            },
-                            onExportLog = {
-                                scope.launch {
-                                    logButtonPress("Export Log")
-                                    val logContent = gameLogger.getLogContents()
-                                    val json = Json.encodeToString(logContent)
-                                    fileExporter.save("FarOutLog.json", json.encodeToByteArray())
-                                }
-                            },
-                            onAdd = {
-                                logButtonPress("Add Team")
-                                screenModel.showAddParticipant(true)
-                            },
-                            onHelp = {
-                                logButtonPress("Help")
-                                screenModel.toggleHelp(true)
-                            },
-                            onShowTeams = {
-                                logButtonPress("Show Teams")
-                                screenModel.showTeamModal(true)
-                            },
-                            onNext = {
-                                logButtonPress("Next")
-                                screenModel.nextParticipant(autoExport = true)
-                            },
-                            onPrev = {
-                                logButtonPress("Previous")
-                                screenModel.previousParticipant()
-                            },
-                            onSkip = {
-                                logButtonPress("Skip")
-                                screenModel.skipParticipant()
-                            },
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Top row: Header card and Timer
+                    Row(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Left: Header card with stats and score
+                        FarOutHeaderCard(
+                            navigator = navigator,
+                            activeName = activeParticipant?.displayName().orEmpty().ifBlank { "No team loaded" },
+                            score = state.score,
                             onUndo = {
                                 logButtonPress("Undo")
                                 screenModel.undo()
                             },
-                            onResetRound = {
-                                logButtonPress("Reset Round")
-                                screenModel.resetRound()
+                            undoEnabled = state.undoAvailable,
+                            allRollersPressed = state.allRollersPressed,
+                            onAllRollers = {
+                                logButtonPress("All Rollers")
+                                screenModel.toggleAllRollers()
                             },
-                            onClearParticipants = {
-                                logButtonPress("Clear Participants")
-                                screenModel.showClearPrompt(true)
-                            },
-                            onViewLog = {
-                                logButtonPress("View Log")
-                                showLogDialog = true
-                            },
-                            undoEnabled = state.undoAvailable
+                            modifier = Modifier.weight(2f).fillMaxHeight()
                         )
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                ParticipantsPanel(
-                                    remainingTeams = remainingTeams,
-                                    activeParticipant = activeParticipant,
-                                    modifier = Modifier.weight(0.35f)
-                                )
-                                ThrowsCard(
-                                    state = state,
-                                    onValueChange = screenModel::updateThrow,
-                                    onMissToggle = screenModel::toggleMiss,
-                                    onDeclinedToggle = screenModel::toggleDeclined,
-                                    onAllRollers = screenModel::toggleAllRollers,
-                                    onResetRound = screenModel::resetRound,
-                                    modifier = Modifier.weight(0.65f),
-                                    log = { logButtonPress(it) }
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(16.dp))
-                            LogCard(entries = state.logEntries.take(6))
+                        // Right: Timer only
+                        FarOutTimerCard(
+                            timer = state.timerDisplay,
+                            onStartTimer = {
+                                logButtonPress("Start Timer")
+                                screenModel.startTimer()
+                            },
+                            onPauseTimer = {
+                                logButtonPress("Pause Timer")
+                                screenModel.pauseOrResumeTimer()
+                            },
+                            onStopTimer = {
+                                logButtonPress("Stop Timer")
+                                screenModel.stopTimer()
+                            },
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        )
+                    }
+
+                    // Middle row: Scoring area and Team Management
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Scoring area (center) - replaces the grid
+                        FarOutScoringCard(
+                            state = state,
+                            onValueChange = screenModel::updateThrow,
+                            onMissToggle = screenModel::toggleMiss,
+                            onDeclinedToggle = screenModel::toggleDeclined,
+                            log = { logButtonPress(it) },
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // Right side: Queue and Team Management
+                        Column(
+                            modifier = Modifier.weight(0.3f).fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Queue card showing teams
+                            FarOutQueueCard(
+                                remainingTeams = remainingTeams,
+                                activeParticipant = activeParticipant,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            // Team Management section
+                            FarOutTeamManagementCard(
+                                onClearTeams = {
+                                    logButtonPress("Clear Participants")
+                                    screenModel.showClearPrompt(true)
+                                },
+                                onImport = {
+                                    logButtonPress("Import")
+                                    filePicker.launch()
+                                },
+                                onAddTeam = {
+                                    logButtonPress("Add Team")
+                                    screenModel.showAddParticipant(true)
+                                },
+                                onExport = {
+                                    scope.launch {
+                                        logButtonPress("Export")
+                                        val templatePath = "templates/UDC FarOut Data Entry L1 Div Sort 1-2025.xlsm"
+                                        val templateBytes = try {
+                                            assetLoader.load(templatePath)
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+
+                                        val result = try {
+                                            screenModel.exportParticipantsAsXlsx(templateBytes)
+                                        } catch (e: Exception) {
+                                            gameLogger.log("Export exception: ${e.message}")
+                                            null
+                                        }
+
+                                        if (result != null) {
+                                            fileExporter.save(result.fileName, result.data)
+                                            gameLogger.log("Export initiated: ${result.fileName}")
+                                        } else {
+                                            gameLogger.log("Export failed: missing template or data generation error")
+                                        }
+                                    }
+                                },
+                                onLog = {
+                                    scope.launch {
+                                        logButtonPress("Export Log")
+                                        val logContent = gameLogger.getLogContents()
+                                        val json = Json.encodeToString(logContent)
+                                        fileExporter.save("FarOutLog.json", json.encodeToByteArray())
+                                    }
+                                },
+                                onResetRound = {
+                                    logButtonPress("Reset Round")
+                                    showResetRoundDialog = true
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
+                    }
+
+                    // Bottom row: Navigation buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Navigation buttons below the scoring area
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    logButtonPress("Help")
+                                    screenModel.toggleHelp(true)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("? HELP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+
+                            Button(
+                                onClick = {
+                                    logButtonPress("Previous")
+                                    screenModel.previousParticipant()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("◄◄ PREV", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+
+                            Button(
+                                onClick = {
+                                    logButtonPress("Next")
+                                    screenModel.nextParticipant(autoExport = true)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("► NEXT", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+
+                            Button(
+                                onClick = {
+                                    logButtonPress("Skip")
+                                    screenModel.skipParticipant()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("►► SKIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+
+                        // Empty spacer to align with right column
+                        Spacer(modifier = Modifier.weight(0.3f))
                     }
                 }
             }
@@ -322,71 +396,260 @@ object FarOutScreen : Screen {
                 onConfirm = { screenModel.resolveTieWarning(null) }
             )
         }
-    }
-}
 
-@Composable
-private fun FarOutHeader(
-    navigator: cafe.adriel.voyager.navigator.Navigator,
-    activeName: String,
-    score: Double,
-    timer: TimerDisplay,
-    onStartTimer: () -> Unit,
-    onPauseTimer: () -> Unit,
-    onStopTimer: () -> Unit,
-    onBack: () -> Unit
-) {
-    Card(shape = RoundedCornerShape(12.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            GameHomeButton(navigator = navigator)
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = "Current Team", style = MaterialTheme.typography.caption)
-                Text(text = activeName, style = MaterialTheme.typography.h6, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Score", style = MaterialTheme.typography.caption)
-                Text(score.formatScore(), style = MaterialTheme.typography.h5, fontWeight = FontWeight.Bold)
-            }
-            TimerControls(timer, onStartTimer, onPauseTimer, onStopTimer)
+        if (showImportModeDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    showImportModeDialog = false
+                    pendingImportResult = null
+                },
+                title = { Text("Import participants") },
+                text = { Text("Would you like to add these participants to the current list, or replace everything?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val import = pendingImportResult
+                            scope.launch {
+                                if (import is ImportResult.Csv) {
+                                    screenModel.importParticipantsFromCsv(import.contents, FarOutScreenModel.ImportMode.Add)
+                                } else if (import is ImportResult.Xlsx) {
+                                    screenModel.importParticipantsFromXlsx(import.bytes, FarOutScreenModel.ImportMode.Add)
+                                }
+                            }
+                            showImportModeDialog = false
+                            pendingImportResult = null
+                        }
+                    ) { Text("Add") }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(
+                            onClick = {
+                                val import = pendingImportResult
+                                scope.launch {
+                                    if (import is ImportResult.Csv) {
+                                        screenModel.importParticipantsFromCsv(import.contents, FarOutScreenModel.ImportMode.ReplaceAll)
+                                    } else if (import is ImportResult.Xlsx) {
+                                        screenModel.importParticipantsFromXlsx(import.bytes, FarOutScreenModel.ImportMode.ReplaceAll)
+                                    }
+                                }
+                                showImportModeDialog = false
+                                pendingImportResult = null
+                            }
+                        ) { Text("Replace") }
+                        TextButton(
+                            onClick = {
+                                showImportModeDialog = false
+                                pendingImportResult = null
+                            }
+                        ) { Text("Cancel") }
+                    }
+                }
+            )
+        }
+
+        if (showResetRoundDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetRoundDialog = false },
+                title = { Text("Reset Round?") },
+                text = { Text("Are you sure you want to reset the current round? All scores will be lost. This action cannot be undone.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            screenModel.resetRound()
+                            showResetRoundDialog = false
+                        }
+                    ) {
+                        Text("Reset", color = Color(0xFFD50000))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetRoundDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }
 
 @Composable
-private fun TimerControls(
-    timer: TimerDisplay,
-    onStart: () -> Unit,
-    onPause: () -> Unit,
-    onStop: () -> Unit
+private fun FarOutHeaderCard(
+    navigator: cafe.adriel.voyager.navigator.Navigator,
+    activeName: String,
+    score: Double,
+    onUndo: () -> Unit,
+    undoEnabled: Boolean,
+    allRollersPressed: Boolean,
+    onAllRollers: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = "${timer.secondsRemaining}s", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onStart, colors = ButtonDefaults.buttonColors(backgroundColor = Palette.info, contentColor = Palette.onInfo)) {
-                Text(if (timer.isRunning) "Restart" else "Start")
-            }
-            Button(
-                onClick = onPause,
-                enabled = timer.isRunning,
-                colors = ButtonDefaults.buttonColors(backgroundColor = Palette.warning, contentColor = Palette.onWarning)
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Column 1: Title and UNDO button
+            Column(
+                modifier = Modifier.weight(0.7f),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(if (timer.isPaused) "Resume" else "Pause")
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GameHomeButton(navigator = navigator)
+                        Text(
+                            text = "Far Out",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = activeName,
+                        fontSize = 13.sp,
+                        color = Color.DarkGray,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Button(
+                    onClick = onUndo,
+                    enabled = undoEnabled,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFFD50000),
+                        contentColor = Color.White,
+                        disabledBackgroundColor = Color(0xFF9E9E9E),
+                        disabledContentColor = Color.White
+                    ),
+                    modifier = Modifier.width(100.dp).height(42.dp)
+                ) {
+                    Text("UNDO", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
             }
+
+            // Column 2: Stats placeholder
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                // Space for future stats if needed
+            }
+
+            // Column 3: Score display and All Rollers button
+            Column(
+                modifier = Modifier.weight(0.8f),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text("Score: ", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = score.formatScore(),
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
+                    )
+                }
+
+                Button(
+                    onClick = onAllRollers,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = if (allRollersPressed) Color(0xFF00C853) else Color(0xFF6750A4),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        if (allRollersPressed) "ALL ROLLERS ✓" else "ALL ROLLERS",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FarOutTimerCard(
+    timer: TimerDisplay,
+    onStartTimer: () -> Unit,
+    onPauseTimer: () -> Unit,
+    onStopTimer: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Top row: START and PAUSE buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onStartTimer,
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("▶", fontSize = 16.sp)
+                        Text(if (timer.isRunning) "RESTART" else "START", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = onPauseTimer,
+                    enabled = timer.isRunning,
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White,
+                        disabledBackgroundColor = Color(0xFF9E9E9E),
+                        disabledContentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (timer.isPaused) "▶" else "⏸", fontSize = 16.sp)
+                        Text(if (timer.isPaused) "RESUME" else "PAUSE", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Bottom row: STOP button
             Button(
-                onClick = onStop,
+                onClick = onStopTimer,
                 enabled = timer.isRunning || timer.secondsRemaining != 90,
-                colors = ButtonDefaults.buttonColors(backgroundColor = Palette.error, contentColor = Palette.onError)
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFFD50000), // Red
+                    contentColor = Color.White,
+                    disabledBackgroundColor = Color(0xFF9E9E9E),
+                    disabledContentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Stop")
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("⏹", fontSize = 16.sp)
+                    Text("STOP", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
             }
+
+            // Time Remaining display
+            Text(
+                "Time: ${timer.secondsRemaining}s",
+                fontSize = 11.sp,
+                color = Color.Gray,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
         }
     }
 }
@@ -457,33 +720,66 @@ private fun SidebarButton(
 }
 
 @Composable
-private fun ParticipantsPanel(
+private fun FarOutQueueCard(
     remainingTeams: List<FarOutParticipant>,
     activeParticipant: FarOutParticipant?,
     modifier: Modifier = Modifier
 ) {
     Card(
+        modifier = modifier.fillMaxWidth().fillMaxHeight(),
         shape = RoundedCornerShape(12.dp),
-        elevation = 4.dp,
-        backgroundColor = Palette.surfaceContainer,
-        modifier = modifier.fillMaxHeight()
+        elevation = 4.dp
     ) {
-        Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-            Text("Remaining (${remainingTeams.size})", fontWeight = FontWeight.Bold)
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
-            if (remainingTeams.isEmpty()) {
-                Text("All teams completed", color = Palette.onSurfaceVariant)
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                "Queue (${remainingTeams.size})",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+
+            // Display teams in queue - scrollable list that fills available space
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (remainingTeams.isEmpty()) {
+                    item {
+                        Text(
+                            "All teams completed",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                } else {
                     items(remainingTeams) { participant ->
-                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                            Text(participant.handler.ifBlank { "Unknown" }, fontWeight = FontWeight.Bold)
-                            Text(participant.dog.ifBlank { "No dog" }, style = MaterialTheme.typography.caption)
-                            if (participant == activeParticipant) {
-                                Text("Active", color = Palette.info, fontSize = 12.sp)
+                        val isActive = participant == activeParticipant
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            backgroundColor = if (isActive) Color(0xFFE3F2FD) else Color.White,
+                            elevation = if (isActive) 2.dp else 0.dp,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                horizontalArrangement = Arrangement.Start,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (isActive) "▶ ${participant.displayName()}"
+                                           else participant.displayName(),
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isActive) Color(0xFF1976D2) else Color.Black,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
-                        Divider()
                     }
                 }
             }
@@ -492,23 +788,123 @@ private fun ParticipantsPanel(
 }
 
 @Composable
-private fun ThrowsCard(
+private fun FarOutTeamManagementCard(
+    onClearTeams: () -> Unit,
+    onImport: () -> Unit,
+    onAddTeam: () -> Unit,
+    onExport: () -> Unit,
+    onLog: () -> Unit,
+    onResetRound: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onClearTeams,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFF7B1FA2),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("CLEAR TEAMS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onImport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("IMPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onAddTeam,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("ADD TEAM", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onExport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("EXPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onLog,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("LOG", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Button(
+                onClick = onResetRound,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFFD50000),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("RESET ROUND", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FarOutScoringCard(
     state: FarOutState,
     onValueChange: (String, String) -> Unit,
     onMissToggle: (String) -> Unit,
     onDeclinedToggle: () -> Unit,
-    onAllRollers: () -> Unit,
-    onResetRound: () -> Unit,
     modifier: Modifier = Modifier,
     log: (String) -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(12.dp),
-        elevation = 4.dp,
-        backgroundColor = Palette.surfaceContainer,
-        modifier = modifier.fillMaxHeight()
+        shape = RoundedCornerShape(18.dp),
+        elevation = 8.dp,
+        modifier = modifier.fillMaxSize()
     ) {
-        Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             ThrowRow(
                 label = "Throw 1",
                 value = state.throwInputs.throw1,
@@ -554,30 +950,24 @@ private fun ThrowsCard(
                 },
                 enabled = !state.sweetShotDeclined
             )
+
+            Spacer(modifier = Modifier.weight(1f))
+
             Divider()
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button(
-                    onClick = { 
-                        log("All Rollers button pressed")
-                        onAllRollers() 
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = if (state.allRollersPressed) Palette.success else Palette.primary,
-                        contentColor = if (state.allRollersPressed) Palette.onSuccess else Palette.onPrimary
-                    )
-                ) {
-                    Text(if (state.allRollersPressed) "All Rollers ✓" else "All Rollers")
-                }
-                OutlinedButton(onClick = { 
-                    log("Reset Score button pressed")
-                    onResetRound() 
-                }) {
-                    Text("Reset Score")
-                }
-                Spacer(modifier = Modifier.weight(1f))
+
+            Row(
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("Current Score", style = MaterialTheme.typography.caption)
-                    Text(text = state.score.formatScore(), style = MaterialTheme.typography.h5, fontWeight = FontWeight.Bold)
+                    Text("Current Score", fontSize = 11.sp, color = Color.Gray)
+                    Text(
+                        text = state.score.formatScore(),
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }

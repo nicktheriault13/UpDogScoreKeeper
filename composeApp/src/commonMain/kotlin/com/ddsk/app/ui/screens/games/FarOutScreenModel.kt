@@ -297,7 +297,12 @@ class FarOutScreenModel(
         logEvent("Moved to previous participant")
     }
 
-    fun importParticipantsFromCsv(csvText: String) {
+    enum class ImportMode {
+        Add,
+        ReplaceAll
+    }
+
+    fun importParticipantsFromCsv(csvText: String, mode: ImportMode = ImportMode.ReplaceAll) {
         val imported = parseCsv(csvText)
         val participants = imported.map {
             FarOutParticipant(
@@ -309,10 +314,10 @@ class FarOutScreenModel(
                 clubDivision = it.clubDivision
             )
         }
-        setParticipants(participants)
+        applyImportedParticipants(participants, mode)
     }
 
-    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
+    fun importParticipantsFromXlsx(xlsxData: ByteArray, mode: ImportMode = ImportMode.ReplaceAll) {
         val imported = parseXlsx(xlsxData)
         val participants = imported.map {
             FarOutParticipant(
@@ -324,9 +329,32 @@ class FarOutScreenModel(
                 clubDivision = it.clubDivision
             )
         }
-        setParticipants(participants)
+        applyImportedParticipants(participants, mode)
     }
 
+    private fun applyImportedParticipants(newParticipants: List<FarOutParticipant>, mode: ImportMode) {
+        if (newParticipants.isEmpty()) return
+
+        _state.update { currentState ->
+            val updatedParticipants = when (mode) {
+                ImportMode.Add -> {
+                    logEvent("Added ${newParticipants.size} participants to existing ${currentState.participants.size}")
+                    currentState.participants + newParticipants
+                }
+                ImportMode.ReplaceAll -> {
+                    logEvent("Replaced all participants with ${newParticipants.size} new participants")
+                    newParticipants
+                }
+            }
+
+            currentState.copy(
+                participants = updatedParticipants,
+                activeIndex = if (mode == ImportMode.ReplaceAll) 0 else currentState.activeIndex
+            )
+        }
+    }
+
+    @Deprecated("Use applyImportedParticipants instead")
     private fun setParticipants(participants: List<FarOutParticipant>) {
         if (participants.isEmpty()) return
         logEvent("Imported ${participants.size} participants")
