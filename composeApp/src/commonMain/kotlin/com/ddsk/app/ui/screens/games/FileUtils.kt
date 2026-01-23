@@ -94,6 +94,7 @@ expect fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templat
 expect fun generateThrowNGoXlsx(participants: List<ThrowNGoParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateBytes: ByteArray): ByteArray
 expect fun generateFunKeyXlsm(participants: List<FunKeyExportParticipant>, templateBytes: ByteArray): ByteArray
+expect fun generateFrizgilityXlsx(participants: List<FrizgilityParticipantWithResults>, templateBytes: ByteArray): ByteArray
 // Spaced Out XLSX export
 expect fun generateSpacedOutXlsx(participants: List<SpacedOutExportParticipant>, templateBytes: ByteArray): ByteArray
 

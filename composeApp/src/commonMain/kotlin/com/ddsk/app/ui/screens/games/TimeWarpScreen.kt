@@ -58,6 +58,9 @@ import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import com.ddsk.app.ui.theme.Palette
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -224,7 +227,9 @@ object TimeWarpScreen : Screen {
                                         addAll(completedParticipants)
                                     }
                                     val bytes = generateTimeWarpXlsx(all, template)
-                                    exporter.save("TimeWarp_Scores.xlsx", bytes)
+                                    val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                    val stamp = timeWarpTimestamp(now)
+                                    exporter.save("TimeWarp_Scores_$stamp.xlsx", bytes)
                                 }
                             },
                             onLog = { /* LOG */ },
@@ -1369,5 +1374,18 @@ private fun QueueCard(
                 }
             }
         }
+    }
+}
+
+private fun timeWarpTimestamp(now: kotlinx.datetime.LocalDateTime): String {
+    fun pad2(n: Int) = n.toString().padStart(2, '0')
+    return buildString {
+        append(now.year)
+        append(pad2(now.monthNumber))
+        append(pad2(now.dayOfMonth))
+        append('_')
+        append(pad2(now.hour))
+        append(pad2(now.minute))
+        append(pad2(now.second))
     }
 }

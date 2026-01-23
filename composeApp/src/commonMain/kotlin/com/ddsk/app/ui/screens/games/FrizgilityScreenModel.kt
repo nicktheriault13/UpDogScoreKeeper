@@ -10,12 +10,66 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+
+@Serializable
+private data class FrizgilityRoundExport(
+    val gameMode: String,
+    val exportTimestamp: String,
+    val participantData: FrizgilityParticipantData,
+    val roundResults: FrizgilityRoundResults,
+    val roundLog: List<String> = emptyList()
+)
+
+@Serializable
+private data class FrizgilityParticipantData(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val completedAt: String
+)
+
+@Serializable
+private data class FrizgilityRoundResults(
+    val obstacles: FrizgilityObstacles,
+    val failures: FrizgilityFailures,
+    val catches: FrizgilityCatches,
+    val misses: Int,
+    val sweetSpot: Boolean,
+    val allRollers: Boolean,
+    val finalScore: Int,
+    val roundLog: List<String> = emptyList()
+)
+
+@Serializable
+private data class FrizgilityObstacles(
+    val obstacle1: Int,
+    val obstacle2: Int,
+    val obstacle3: Int
+)
+
+@Serializable
+private data class FrizgilityFailures(
+    val fail1: Int,
+    val fail2: Int,
+    val fail3: Int,
+    val failTotal: Int
+)
+
+@Serializable
+private data class FrizgilityCatches(
+    val catch3to10: Int,
+    val catch10plus: Int
+)
 
 class FrizgilityScreenModel : ScreenModel {
 
@@ -40,6 +94,18 @@ class FrizgilityScreenModel : ScreenModel {
 
     private val _logEntries = MutableStateFlow<List<String>>(emptyList())
     val logEntries = _logEntries.asStateFlow()
+
+    data class PendingJsonExport(
+        val filename: String,
+        val content: String
+    )
+
+    private val _pendingJsonExport = MutableStateFlow<PendingJsonExport?>(null)
+    val pendingJsonExport: StateFlow<PendingJsonExport?> = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
 
     private var dataStore: DataStore? = null
     private val persistenceKey = "FrizgilityData.json"
@@ -207,28 +273,44 @@ class FrizgilityScreenModel : ScreenModel {
         persistState()
     }
 
-    fun importParticipantsFromCsv(csvText: String) {
+    enum class ImportMode {
+        Add,
+        ReplaceAll
+    }
+
+    fun importParticipantsFromCsv(csvText: String, mode: ImportMode = ImportMode.Add) {
         val imported = parseCsv(csvText)
         val players = imported.map { FrizgilityParticipant(it.handler, it.dog, it.utn) }
-        applyImportedPlayers(players)
+        applyImportedPlayers(players, mode)
     }
 
-    fun importParticipantsFromXlsx(xlsxData: ByteArray) {
+    fun importParticipantsFromXlsx(xlsxData: ByteArray, mode: ImportMode = ImportMode.Add) {
         val imported = parseXlsx(xlsxData)
         val players = imported.map { FrizgilityParticipant(it.handler, it.dog, it.utn) }
-        applyImportedPlayers(players)
+        applyImportedPlayers(players, mode)
     }
 
-    private fun applyImportedPlayers(players: List<FrizgilityParticipant>) {
+    private fun applyImportedPlayers(players: List<FrizgilityParticipant>, mode: ImportMode) {
         if (players.isEmpty()) return
-        _uiState.update {
-            it.copy(
-                participants = players,
-                activeParticipantIndex = 0
-            )
+        _uiState.update { state ->
+            when (mode) {
+                ImportMode.Add -> {
+                    state.copy(
+                        participants = state.participants + players
+                    )
+                }
+                ImportMode.ReplaceAll -> {
+                    state.copy(
+                        participants = players,
+                        activeParticipantIndex = 0
+                    )
+                }
+            }
         }
-        resetGame()
-        appendLog("Imported ${players.size} participants")
+        if (mode == ImportMode.ReplaceAll) {
+            resetGame()
+        }
+        appendLog("Imported ${players.size} participants (mode: $mode)")
         persistState()
     }
 
@@ -240,12 +322,237 @@ class FrizgilityScreenModel : ScreenModel {
         return participants.joinToString("\n") { "${it.handler},${it.dog},${it.utn}" }
     }
 
+    fun exportLog(): String {
+        val entries = _logEntries.value
+        return if (entries.isEmpty()) {
+            "No log entries"
+        } else {
+            entries.reversed().joinToString("\n")
+        }
+    }
+
+    data class ExportResult(
+        val xlsxBytes: ByteArray,
+        val tieWarning: String? = null
+    )
+
+    fun exportScoresXlsx(templateBytes: ByteArray): ByteArray {
+        val currentState = _uiState.value
+        val participants = mutableListOf<FrizgilityParticipantWithResults>()
+
+        // Add all completed participants
+        participants.addAll(currentState.completedParticipants)
+
+        // Add active participant with current scores if they have any scoring data
+        val active = currentState.activeParticipant
+        if (active != null) {
+            val hasScores = currentState.counters.obstacle1 + currentState.counters.obstacle2 +
+                           currentState.counters.obstacle3 + currentState.counters.catch10plus +
+                           currentState.counters.catch3to10 + currentState.counters.miss > 0 ||
+                           currentState.sweetSpotActive
+
+            if (hasScores) {
+                participants.add(
+                    FrizgilityParticipantWithResults(
+                        handler = active.handler,
+                        dog = active.dog,
+                        utn = active.utn,
+                        obstacle1 = currentState.counters.obstacle1,
+                        obstacle2 = currentState.counters.obstacle2,
+                        obstacle3 = currentState.counters.obstacle3,
+                        fail1 = currentState.counters.fail1,
+                        fail2 = currentState.counters.fail2,
+                        fail3 = currentState.counters.fail3,
+                        catch10plus = currentState.counters.catch10plus,
+                        catch3to10 = currentState.counters.catch3to10,
+                        misses = currentState.counters.miss,
+                        sweetSpot = currentState.sweetSpotActive,
+                        heightDivision = active.heightDivision
+                    )
+                )
+            }
+        }
+
+        return generateFrizgilityXlsx(participants, templateBytes)
+    }
+
+    fun checkForTies(participants: List<FrizgilityParticipantWithResults>): String? {
+        if (participants.isEmpty()) return null
+
+        // Calculate scores and sort
+        data class ParticipantScore(
+            val participant: FrizgilityParticipantWithResults,
+            val finalScore: Int,
+            val misses: Int,
+            val failTotal: Int
+        )
+
+        val scored = participants.map { p ->
+            val failTotal = p.fail1 + p.fail2 + p.fail3
+            val finalScore = (p.obstacle1 + p.obstacle2 + p.obstacle3) * 5 +
+                           (p.catch10plus * 10) + (p.catch3to10 * 3) +
+                           (if (p.sweetSpot) 10 else 0)
+            ParticipantScore(p, finalScore, p.misses, failTotal)
+        }.sortedWith(
+            compareByDescending<ParticipantScore> { it.finalScore }
+                .thenBy { it.misses }
+                .thenBy { it.failTotal }
+        )
+
+        // Check for unresolved ties in top 5 positions
+        val ties = mutableListOf<Pair<Int, List<String>>>()
+        var i = 0
+        while (i < minOf(5, scored.size)) {
+            val current = scored[i]
+            val tiedTeams = mutableListOf<String>()
+            val place = i + 1
+
+            var j = i
+            while (j < scored.size) {
+                val participant = scored[j]
+                if (participant.finalScore == current.finalScore &&
+                    participant.misses == current.misses &&
+                    participant.failTotal == current.failTotal) {
+                    val teamName = "${participant.participant.handler} & ${participant.participant.dog}"
+                    tiedTeams.add(teamName)
+                    j++
+                } else {
+                    break
+                }
+            }
+
+            if (tiedTeams.size > 1) {
+                ties.add(Pair(place, tiedTeams))
+            }
+            i = j
+        }
+
+        if (ties.isEmpty()) return null
+
+        val tieMessages = ties.joinToString("\n") { (place, teams) ->
+            val placeStr = when (place) {
+                1 -> "1st"
+                2 -> "2nd"
+                3 -> "3rd"
+                4 -> "4th"
+                5 -> "5th"
+                else -> "${place}th"
+            }
+            "$placeStr place: ${teams.joinToString(", ")}"
+        }
+
+        return "The following teams are tied and could not be resolved by tiebreakers:\n\n$tieMessages"
+    }
+
+    private fun exportSnapshot(): List<FrizgilityParticipant> {
+        val current = _uiState.value
+        val all = mutableListOf<FrizgilityParticipant>()
+        current.activeParticipant?.let { all.add(it) }
+        all.addAll(current.participants)
+        return all
+    }
+
     fun nextParticipant() {
         if (_uiState.value.participants.isNotEmpty()) {
-            _uiState.update {
-                it.copy(
-                    activeParticipantIndex = (it.activeParticipantIndex + 1) % it.participants.size
+            val currentState = _uiState.value
+            val currentParticipant = currentState.activeParticipant
+
+            // Save the current participant's results and emit JSON export
+            if (currentParticipant != null) {
+                val completedParticipant = FrizgilityParticipantWithResults(
+                    handler = currentParticipant.handler,
+                    dog = currentParticipant.dog,
+                    utn = currentParticipant.utn,
+                    obstacle1 = currentState.counters.obstacle1,
+                    obstacle2 = currentState.counters.obstacle2,
+                    obstacle3 = currentState.counters.obstacle3,
+                    fail1 = currentState.counters.fail1,
+                    fail2 = currentState.counters.fail2,
+                    fail3 = currentState.counters.fail3,
+                    catch10plus = currentState.counters.catch10plus,
+                    catch3to10 = currentState.counters.catch3to10,
+                    misses = currentState.counters.miss,
+                    sweetSpot = currentState.sweetSpotActive,
+                    heightDivision = currentParticipant.heightDivision
                 )
+
+                // Emit per-round JSON export
+                val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                val stamp = exportStamp(now)
+                val safeHandler = currentParticipant.handler.replace("\\s+".toRegex(), "")
+                val safeDog = currentParticipant.dog.replace("\\s+".toRegex(), "")
+                val filename = "Frizgility_${safeHandler}_${safeDog}_$stamp.json"
+
+                val failTotal = currentState.counters.fail1 + currentState.counters.fail2 + currentState.counters.fail3
+                val finalScore = (currentState.counters.obstacle1 + currentState.counters.obstacle2 + currentState.counters.obstacle3) * 5 +
+                                (currentState.counters.catch10plus * 10) + (currentState.counters.catch3to10 * 3) +
+                                (if (currentState.sweetSpotActive) 10 else 0)
+
+                val exportData = FrizgilityRoundExport(
+                    gameMode = "Frizgility",
+                    exportTimestamp = Clock.System.now().toString(),
+                    participantData = FrizgilityParticipantData(
+                        handler = currentParticipant.handler,
+                        dog = currentParticipant.dog,
+                        utn = currentParticipant.utn,
+                        completedAt = now.toString()
+                    ),
+                    roundResults = FrizgilityRoundResults(
+                        obstacles = FrizgilityObstacles(
+                            obstacle1 = currentState.counters.obstacle1,
+                            obstacle2 = currentState.counters.obstacle2,
+                            obstacle3 = currentState.counters.obstacle3
+                        ),
+                        failures = FrizgilityFailures(
+                            fail1 = currentState.counters.fail1,
+                            fail2 = currentState.counters.fail2,
+                            fail3 = currentState.counters.fail3,
+                            failTotal = failTotal
+                        ),
+                        catches = FrizgilityCatches(
+                            catch3to10 = currentState.counters.catch3to10,
+                            catch10plus = currentState.counters.catch10plus
+                        ),
+                        misses = currentState.counters.miss,
+                        sweetSpot = currentState.sweetSpotActive,
+                        allRollers = currentState.allRollersEnabled,
+                        finalScore = finalScore,
+                        roundLog = _logEntries.value
+                    ),
+                    roundLog = _logEntries.value
+                )
+
+                _pendingJsonExport.value = PendingJsonExport(
+                    filename = filename,
+                    content = exportJson.encodeToString(exportData)
+                )
+
+                _uiState.update {
+                    it.copy(
+                        activeParticipantIndex = (it.activeParticipantIndex + 1) % it.participants.size,
+                        completedParticipants = it.completedParticipants + completedParticipant
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        activeParticipantIndex = (it.activeParticipantIndex + 1) % it.participants.size
+                    )
+                }
+            }
+
+            resetGame()
+            persistState()
+        }
+    }
+
+    fun previousParticipant() {
+        if (_uiState.value.participants.isNotEmpty()) {
+            val currentIndex = _uiState.value.activeParticipantIndex
+            val participantsSize = _uiState.value.participants.size
+            val newIndex = if (currentIndex == 0) participantsSize - 1 else currentIndex - 1
+            _uiState.update {
+                it.copy(activeParticipantIndex = newIndex)
             }
             resetGame()
             persistState()
@@ -256,6 +563,12 @@ class FrizgilityScreenModel : ScreenModel {
         nextParticipant() // For now skip just moves next
     }
 
+    fun flipField() {
+        _uiState.update { it.copy(fieldFlipped = !it.fieldFlipped) }
+        appendLog("Field flipped")
+        persistState()
+    }
+
     fun addParticipant(handler: String, dog: String, utn: String) {
         val newParticipant = FrizgilityParticipant(handler, dog, utn)
         _uiState.update { it.copy(participants = it.participants + newParticipant) }
@@ -263,7 +576,13 @@ class FrizgilityScreenModel : ScreenModel {
     }
 
     fun clearParticipants() {
-        _uiState.update { it.copy(participants = emptyList(), activeParticipantIndex = 0) }
+        _uiState.update {
+            it.copy(
+                participants = emptyList(),
+                activeParticipantIndex = 0,
+                completedParticipants = emptyList()
+            )
+        }
         persistState()
     }
 
@@ -346,6 +665,25 @@ class FrizgilityScreenModel : ScreenModel {
         private const val DEFAULT_TIMER_SECONDS = 60
         private const val MAX_UNDO_SIZE = 200
     }
+
+    private val exportJson = Json {
+        prettyPrint = true
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
+
+    private fun exportStamp(now: kotlinx.datetime.LocalDateTime): String {
+        fun pad2(n: Int) = n.toString().padStart(2, '0')
+        return buildString {
+            append(now.year)
+            append(pad2(now.monthNumber))
+            append(pad2(now.dayOfMonth))
+            append('_')
+            append(pad2(now.hour))
+            append(pad2(now.minute))
+            append(pad2(now.second))
+        }
+    }
 }
 
 @Serializable
@@ -353,6 +691,25 @@ data class FrizgilityParticipant(
     val handler: String,
     val dog: String,
     val utn: String,
+    val heightDivision: String = ""
+)
+
+@Serializable
+data class FrizgilityParticipantWithResults(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val obstacle1: Int = 0,
+    val obstacle2: Int = 0,
+    val obstacle3: Int = 0,
+    val fail1: Int = 0,
+    val fail2: Int = 0,
+    val fail3: Int = 0,
+    val catch10plus: Int = 0,
+    val catch3to10: Int = 0,
+    val misses: Int = 0,
+    val sweetSpot: Boolean = false,
+    val heightDivision: String = ""
 )
 
 @Serializable
@@ -394,12 +751,14 @@ data class FrizgilityUiState(
     val catchLocks: Set<Int> = emptySet(),
     val missClicksInPhase: Int = 0,
     val sidebarCollapsed: Boolean = false,
+    val fieldFlipped: Boolean = false,
     val participants: List<FrizgilityParticipant> = listOf(
         FrizgilityParticipant("Alex", "Nova", "UTN-001"),
         FrizgilityParticipant("Blair", "Zelda", "UTN-002"),
         FrizgilityParticipant("Casey", "Milo", "UTN-003")
     ),
-    val activeParticipantIndex: Int = 0
+    val activeParticipantIndex: Int = 0,
+    val completedParticipants: List<FrizgilityParticipantWithResults> = emptyList()
 ) {
     val scoreBreakdown: ScoreBreakdown get() = counters.toScoreBreakdown(sweetSpotActive)
     val activeParticipant: FrizgilityParticipant?

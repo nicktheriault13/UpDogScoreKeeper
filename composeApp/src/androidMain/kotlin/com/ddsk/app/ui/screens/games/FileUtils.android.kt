@@ -528,6 +528,132 @@ actual fun generateThrowNGoXlsx(participants: List<ThrowNGoParticipant>, templat
     }
 }
 
+actual fun generateFrizgilityXlsx(participants: List<FrizgilityParticipantWithResults>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 (0-based)
+
+        // Filter out participants with no scoring data
+        val participantsWithData = participants.filter { p ->
+            p.obstacle1 + p.obstacle2 + p.obstacle3 + p.catch10plus + p.catch3to10 + p.misses > 0 || p.sweetSpot
+        }
+
+        // If no data to export, return the template as-is
+        if (participantsWithData.isEmpty()) {
+            val bos = ByteArrayOutputStream()
+            workbook.write(bos)
+            workbook.close()
+            return bos.toByteArray()
+        }
+
+        // Calculate scores for each participant
+        val participantsWithScores = participantsWithData.map { p ->
+            val obstacle1 = p.obstacle1
+            val obstacle2 = p.obstacle2
+            val obstacle3 = p.obstacle3
+            val fail1 = p.fail1
+            val fail2 = p.fail2
+            val fail3 = p.fail3
+            val failTotal = fail1 + fail2 + fail3
+            val catch10plus = p.catch10plus
+            val catch3to10 = p.catch3to10
+            val misses = p.misses
+            val sweetSpot = p.sweetSpot
+
+            // Calculate score: (obstacles * 5) + (catch10plus * 10) + (catch3to10 * 3) + (sweetSpot ? 10 : 0)
+            val finalScore = (obstacle1 + obstacle2 + obstacle3) * 5 + (catch10plus * 10) + (catch3to10 * 3) + (if (sweetSpot) 10 else 0)
+
+            Triple(p, failTotal, finalScore)
+        }
+
+        // Sort by score (highest first), then by misses (lowest first), then by failTotal (lowest first)
+        val sorted = participantsWithScores.sortedWith(
+            compareByDescending<Triple<FrizgilityParticipantWithResults, Int, Int>> { it.third }
+                .thenBy { it.first.misses }
+                .thenBy { it.second }
+        )
+
+        sorted.forEachIndexed { index, (p, failTotal, finalScore) ->
+            val rowNum = startRow + index
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+
+            // Column A (0): Level (1 for Level 1)
+            val cellA = row.getCell(0) ?: row.createCell(0)
+            cellA.setCellValue(1.0)
+
+            // Column B (1): Handler
+            val cellB = row.getCell(1) ?: row.createCell(1)
+            cellB.setCellValue(p.handler)
+
+            // Column C (2): Dog
+            val cellC = row.getCell(2) ?: row.createCell(2)
+            cellC.setCellValue(p.dog)
+
+            // Column D (3): UTN
+            val cellD = row.getCell(3) ?: row.createCell(3)
+            cellD.setCellValue(p.utn)
+
+            // Column E (4): Obstacle 1 count
+            val cellE = row.getCell(4) ?: row.createCell(4)
+            cellE.setCellValue(p.obstacle1.toDouble())
+
+            // Column F (5): Obstacle 2 count
+            val cellF = row.getCell(5) ?: row.createCell(5)
+            cellF.setCellValue(p.obstacle2.toDouble())
+
+            // Column G (6): Obstacle 3 count
+            val cellG = row.getCell(6) ?: row.createCell(6)
+            cellG.setCellValue(p.obstacle3.toDouble())
+
+            // Column H (7): Missed obstacles (fail total)
+            val cellH = row.getCell(7) ?: row.createCell(7)
+            cellH.setCellValue(failTotal.toDouble())
+
+            // Column I (8): 10+ Catch count
+            val cellI = row.getCell(8) ?: row.createCell(8)
+            cellI.setCellValue(p.catch10plus.toDouble())
+
+            // Column J (9): 3-10 Catch count
+            val cellJ = row.getCell(9) ?: row.createCell(9)
+            cellJ.setCellValue(p.catch3to10.toDouble())
+
+            // Column K (10): Missed/OB catches
+            val cellK = row.getCell(10) ?: row.createCell(10)
+            cellK.setCellValue(p.misses.toDouble())
+
+            // Column L (11): Sweet Spot (Y/N)
+            val cellL = row.getCell(11) ?: row.createCell(11)
+            cellL.setCellValue(if (p.sweetSpot) "Y" else "N")
+
+            // Column N (13): Perfect Round (Y/N)
+            val catchTotal = p.catch10plus + p.catch3to10
+            val isPerfectRound = p.obstacle1 >= 4 && p.obstacle2 >= 4 && p.obstacle3 >= 4 &&
+                                 catchTotal >= 4 && failTotal == 0 && p.misses == 0
+            val cellN = row.getCell(13) ?: row.createCell(13)
+            cellN.setCellValue(if (isPerfectRound) "Y" else "N")
+
+            // Column O (14): Perfect Round with 5 (Y/N)
+            val isPerfectRound5 = p.obstacle1 >= 5 && p.obstacle2 >= 5 && p.obstacle3 >= 5 &&
+                                  catchTotal >= 5 && failTotal == 0 && p.misses == 0
+            val cellO = row.getCell(14) ?: row.createCell(14)
+            cellO.setCellValue(if (isPerfectRound5) "Y" else "N")
+
+            // Column P (15): Height Division
+            val cellP = row.getCell(15) ?: row.createCell(15)
+            cellP.setCellValue(p.heightDivision)
+        }
+
+        val bos = ByteArrayOutputStream()
+        workbook.write(bos)
+        workbook.close()
+        bos.toByteArray()
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+
 actual fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateBytes: ByteArray): ByteArray {
     return try {
         val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))

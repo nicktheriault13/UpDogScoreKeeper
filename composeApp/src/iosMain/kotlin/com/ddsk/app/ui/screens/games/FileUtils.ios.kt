@@ -45,6 +45,8 @@ actual fun generateTimeWarpXlsx(participants: List<TimeWarpParticipant>, templat
 
 actual fun generateThrowNGoXlsx(participants: List<ThrowNGoParticipant>, templateBytes: ByteArray): ByteArray = ByteArray(0)
 
+actual fun generateFrizgilityXlsx(participants: List<FrizgilityParticipantWithResults>, templateBytes: ByteArray): ByteArray = ByteArray(0)
+
 actual fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateBytes: ByteArray): ByteArray = ByteArray(0)
 
 actual fun generateFunKeyXlsm(participants: List<FunKeyExportParticipant>, templateBytes: ByteArray): ByteArray = ByteArray(0)

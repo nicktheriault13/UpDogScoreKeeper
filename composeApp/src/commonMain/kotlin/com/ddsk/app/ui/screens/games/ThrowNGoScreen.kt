@@ -49,6 +49,9 @@ import androidx.compose.material.MaterialTheme
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.ddsk.app.ui.components.GameHomeButton
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 object ThrowNGoScreen : Screen {
     @Composable
@@ -169,7 +172,9 @@ object ThrowNGoScreen : Screen {
                                     val template = assetLoader.load("templates/UDC Throw N Go Data Entry L1 or L2 Div Sort.xlsx")
                                     if (template != null) {
                                         val bytes = screenModel.exportScoresXlsx(template)
-                                        exporter.save("ThrowNGo_Scores.xlsx", bytes)
+                                        val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                        val stamp = throwNGoTimestamp(now)
+                                        exporter.save("ThrowNGo_Scores_$stamp.xlsx", bytes)
                                     }
                                 },
                                 onLog = {
@@ -978,5 +983,18 @@ private fun ParticipantList(uiState: ThrowNGoUiState, modifier: Modifier = Modif
                 }
             }
         }
+    }
+}
+
+private fun throwNGoTimestamp(now: kotlinx.datetime.LocalDateTime): String {
+    fun pad2(n: Int) = n.toString().padStart(2, '0')
+    return buildString {
+        append(now.year)
+        append(pad2(now.monthNumber))
+        append(pad2(now.dayOfMonth))
+        append('_')
+        append(pad2(now.hour))
+        append(pad2(now.minute))
+        append(pad2(now.second))
     }
 }
