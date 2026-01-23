@@ -2,7 +2,6 @@ package com.ddsk.app.ui.screens.games
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,7 +20,6 @@ import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Card
-import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
@@ -47,20 +44,19 @@ import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
-import com.ddsk.app.ui.theme.Palette
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 private val successGreen = Color(0xFF00C853)
 private val warningOrange = Color(0xFFFF9100)
 private val greedyPink = Color(0xFFF500A1)
 private val infoBlue = Color(0xFF2196F3)
-private val onSurfaceVariant = Color(0xFF49454F)
 
 object GreedyScreen : Screen {
     @Composable
@@ -75,9 +71,12 @@ object GreedyScreen : Screen {
         val score by screenModel.score.collectAsState()
         val misses by screenModel.misses.collectAsState()
         val throwZone by screenModel.throwZone.collectAsState()
-        val rotationDegrees by screenModel.rotationDegrees.collectAsState()
         val sweetSpotBonus by screenModel.sweetSpotBonus.collectAsState()
         val allRollersEnabled by screenModel.allRollersEnabled.collectAsState()
+        val fieldFlipped by screenModel.fieldFlipped.collectAsState()
+        val rotationDegrees by screenModel.rotationDegrees.collectAsState()
+        val isClockwiseDisabled by screenModel.isClockwiseDisabled.collectAsState()
+        val isCounterClockwiseDisabled by screenModel.isCounterClockwiseDisabled.collectAsState()
 
         val activeButtons by screenModel.activeButtons.collectAsState()
         val participants by screenModel.participants.collectAsState()
@@ -99,6 +98,8 @@ object GreedyScreen : Screen {
         var pendingImportResult by remember { mutableStateOf<ImportResult?>(null) }
         var showSweetSpotBonusDialog by remember { mutableStateOf(false) }
         var sweetSpotBonusInput by remember { mutableStateOf("") }
+        var showClearTeamsDialog by remember { mutableStateOf(false) }
+        var showResetRoundDialog by remember { mutableStateOf(false) }
 
         val filePicker = rememberFilePicker { result ->
             when (result) {
@@ -118,115 +119,182 @@ object GreedyScreen : Screen {
             if (timerRunning.value) audioPlayer.play() else audioPlayer.stop()
         }
 
-        Surface(color = Palette.background, modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Home button is rendered inside the score card to avoid overlap.
-
-                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                    val columnSpacing = 16.dp
+        Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Top row: Header card and Timer/Control
                     Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(columnSpacing),
-                        horizontalArrangement = Arrangement.spacedBy(columnSpacing)
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Left: scoring + controls
+                        // Left: Header card with stats and score
+                        GreedyScoreSummaryCard(
+                            navigator = navigator,
+                            handlerDog = participants.firstOrNull()?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
+                            throwZone = throwZone,
+                            score = score,
+                            misses = misses,
+                            sweetSpotBonus = sweetSpotBonus,
+                            allRollers = allRollersEnabled,
+                            onUndo = screenModel::undo,
+                            onSweetSpotBonus = { showSweetSpotBonusDialog = true },
+                            sweetSpotBonusEntered = sweetSpotBonus > 0,
+                            onMissPlus = screenModel::incrementMisses,
+                            onAllRollersToggle = screenModel::toggleAllRollers,
+                            allRollersEnabled = allRollersEnabled,
+                            modifier = Modifier.weight(2f).fillMaxHeight()
+                        )
+
+                        // Right: Timer/Control
+                        GreedyControlCard(
+                            timerRunning = timerRunning.value,
+                            onToggleTimer = { timerRunning.value = !timerRunning.value },
+                            onReset = screenModel::reset,
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        )
+                    }
+
+                    // Middle row: Main game grid and Team Management
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Main grid (center)
+                        GreedyScoringCard(
+                            activeButtons = activeButtons,
+                            throwZone = throwZone,
+                            onPress = screenModel::handleButtonPress,
+                            fieldFlipped = fieldFlipped,
+                            rotationDegrees = rotationDegrees,
+                            anyButtonClicked = activeButtons.isNotEmpty(),
+                            onNextThrowZoneCounterClockwise = { screenModel.nextThrowZone(clockwise = false) },
+                            onNextThrowZoneClockwise = { screenModel.nextThrowZone(clockwise = true) },
+                            isClockwiseDisabled = isClockwiseDisabled,
+                            isCounterClockwiseDisabled = isCounterClockwiseDisabled,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // Right side: Queue and Team Management
                         Column(
-                            modifier = Modifier
-                                .weight(2f)
-                                .fillMaxHeight(),
-                            verticalArrangement = Arrangement.spacedBy(columnSpacing)
+                            modifier = Modifier.weight(0.3f).fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    GreedyScoreSummaryCard(
-                                        navigator = navigator,
-                                        handlerDog = participants.firstOrNull()?.let { "${it.handler} & ${it.dog}" } ?: "No active team",
-                                        throwZone = throwZone,
-                                        score = score,
-                                        misses = misses,
-                                        sweetSpotBonus = sweetSpotBonus,
-                                        allRollers = allRollersEnabled,
-                                        onUndo = screenModel::undo,
-                                        onSweetSpotBonus = { showSweetSpotBonusDialog = true },
-                                        sweetSpotBonusEntered = sweetSpotBonus > 0,
-                                        onMissPlus = screenModel::incrementMisses,
-                                        onAllRollersToggle = screenModel::toggleAllRollers,
-                                        allRollersEnabled = allRollersEnabled
-                                    )
-                                }
-
-                                GreedyZoneControlCard(
-                                    throwZone = throwZone,
-                                    anySquareClicked = activeButtons.isNotEmpty(),
-                                    onNextThrowZoneClockwise = { screenModel.nextThrowZone(clockwise = true) },
-                                    onNextThrowZoneCounterClockwise = { screenModel.nextThrowZone(clockwise = false) },
-                                    clockwiseDisabled = screenModel.isClockwiseDisabled.collectAsState().value,
-                                    counterClockwiseDisabled = screenModel.isCounterClockwiseDisabled.collectAsState().value,
-                                    rotateStartingVisible = screenModel.isRotateStartingZoneVisible.collectAsState().value,
-                                    onRotateStartingZone = screenModel::rotateStartingZone,
-                                    modifier = Modifier.width(190.dp)
-                                )
-                            }
-
-                            BoxWithConstraints(
-                                modifier = Modifier
-                                    // Give the board a chance to grow, but also guarantee a minimum so it doesn't collapse.
-                                    .weight(1f, fill = true)
-                                    .heightIn(min = 260.dp)
-                                    .fillMaxWidth()
-                            ) {
-                                // Fit the board to the available height so it doesn't get clipped.
-                                val boardSide = minOf(maxWidth, maxHeight)
-                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                    GreedyBoard(
-                                        rotationDegrees = rotationDegrees,
-                                        activeButtons = activeButtons,
-                                        throwZone = throwZone,
-                                        onPress = screenModel::handleButtonPress,
-                                        modifier = Modifier.size(boardSide)
-                                    )
-                                }
-                            }
-
-                            GreedyControlRow(
-                                timerRunning = timerRunning.value,
-                                onToggleTimer = { timerRunning.value = !timerRunning.value },
-                                onReset = screenModel::reset
+                            // Queue card showing teams in queue
+                            GreedyQueueCard(
+                                queue = participants,
+                                modifier = Modifier.weight(1f)
                             )
-                        }
 
-                        // Right: queue + import/export (Boom-style)
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            verticalArrangement = Arrangement.spacedBy(columnSpacing)
-                        ) {
-                            GreedyImportExportCard(
-                                onImportClick = { filePicker.launch() },
-                                onExportClick = {
+                            // Team Management section
+                            GreedyTeamManagementCard(
+                                onClearTeams = { showClearTeamsDialog = true },
+                                onImport = { filePicker.launch() },
+                                onAddTeam = { showAddParticipant = true },
+                                onExport = {
                                     val template = assetLoader.load("templates/UDC Greedy Data Entry L1 Div Sort.xlsx")
                                     if (template != null) {
                                         val bytes = screenModel.exportParticipantsAsXlsx(template)
-                                        exporter.save("Greedy_Scores.xlsx", bytes)
+                                        val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                                        val stamp = greedyTimestamp(now)
+                                        exporter.save("Greedy_Scores_$stamp.xlsx", bytes)
                                     }
                                 },
-                                onExportCsvClick = {
-                                    val csv = screenModel.exportParticipantsAsCsv()
-                                    scope.launch { saveJsonFileWithPicker("Greedy_Scores.csv", csv) }
+                                onLog = {
+                                    val content = screenModel.exportLog()
+                                    scope.launch {
+                                        saveJsonFileWithPicker("Greedy_Log.txt", content)
+                                    }
                                 },
-                                onAddTeamClick = { showAddParticipant = true },
-                                onClearClick = screenModel::clearParticipants,
-                                onPreviousParticipant = screenModel::previousParticipant,
-                                onSkipParticipant = screenModel::skipParticipant,
-                                onNextParticipant = screenModel::nextParticipant
+                                onResetRound = { showResetRoundDialog = true },
+                                modifier = Modifier.weight(1f)
                             )
                         }
+                    }
+
+                    // Bottom row: Navigation buttons aligned below the grid
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Navigation buttons below the scoring grid
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = screenModel::flipField,
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("↕ FLIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+
+                            Button(
+                                onClick = screenModel::previousParticipant,
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("◄◄ PREV", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+
+                            Button(
+                                onClick = screenModel::nextParticipant,
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("► NEXT", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+
+                            Button(
+                                onClick = screenModel::skipParticipant,
+                                colors = ButtonDefaults.buttonColors(
+                                    backgroundColor = Color(0xFF6750A4),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f).height(50.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("►► SKIP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+                        }
+
+                        // Empty spacer to align with right column
+                        Spacer(modifier = Modifier.weight(0.3f))
                     }
                 }
             }
@@ -331,6 +399,52 @@ object GreedyScreen : Screen {
                 }
             )
         }
+
+        if (showClearTeamsDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearTeamsDialog = false },
+                title = { Text("Clear All Teams?") },
+                text = { Text("Are you sure you want to clear all teams? This action cannot be undone.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            screenModel.clearParticipants()
+                            showClearTeamsDialog = false
+                        }
+                    ) {
+                        Text("Clear", color = Color(0xFFD50000))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearTeamsDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showResetRoundDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetRoundDialog = false },
+                title = { Text("Reset Round?") },
+                text = { Text("Are you sure you want to reset the current round? All scores will be lost. This action cannot be undone.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            screenModel.reset()
+                            showResetRoundDialog = false
+                        }
+                    ) {
+                        Text("Reset", color = Color(0xFFD50000))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetRoundDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -348,162 +462,300 @@ private fun GreedyScoreSummaryCard(
     sweetSpotBonusEntered: Boolean,
     onMissPlus: () -> Unit,
     onAllRollersToggle: () -> Unit,
-    allRollersEnabled: Boolean
+    allRollersEnabled: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        elevation = 6.dp,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Column 1: Title and UNDO button
+            Column(
+                modifier = Modifier.weight(0.7f),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                GameHomeButton(navigator = navigator)
-                Text(text = "Score: $score", style = MaterialTheme.typography.h4)
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "Throw Zone: $throwZone",
-                    style = MaterialTheme.typography.body2,
-                    color = onSurfaceVariant
-                )
-            }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    text = "Misses: $misses • Bonus: $sweetSpotBonus",
-                    style = MaterialTheme.typography.body2,
-                    color = onSurfaceVariant
-                )
-                Text(
-                    text = if (allRollers) "All Rollers: Y" else "All Rollers: N",
-                    style = MaterialTheme.typography.body2,
-                    color = onSurfaceVariant
-                )
-            }
-            Text(
-                text = "Active: $handlerDog",
-                style = MaterialTheme.typography.subtitle1,
-                fontWeight = FontWeight.Bold
-            )
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GameHomeButton(navigator = navigator)
+                        Text(
+                            text = "Greedy",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
 
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Button(onClick = onUndo) { Text("Undo") }
+                    Text(
+                        text = handlerDog,
+                        fontSize = 13.sp,
+                        color = Color.DarkGray
+                    )
+                }
 
                 Button(
-                    onClick = onSweetSpotBonus,
-                    enabled = !sweetSpotBonusEntered,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = warningOrange)
-                ) { Text("Sweet Spot Bonus", color = Color.White, fontSize = 12.sp) }
+                    onClick = onUndo,
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFFD50000),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.width(100.dp).height(42.dp)
+                ) {
+                    Text("UNDO", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+            }
 
+            // Column 2: Main stats
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("Throw Zone:", fontSize = 14.sp)
+                    Text("$throwZone", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("Bonus:", fontSize = 14.sp)
+                    Text("$sweetSpotBonus", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // MISS button (full width)
                 Button(
                     onClick = onMissPlus,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFD50000))
-                ) { Text("Miss+", color = Color.White, fontSize = 12.sp) }
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFFD50000),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("MISS", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("$misses", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
 
-                Button(
-                    onClick = onAllRollersToggle,
-                    colors = ButtonDefaults.buttonColors(backgroundColor = if (allRollersEnabled) successGreen else Color(0xFF2979FF))
-                ) { Text("All Rollers", color = Color.White, fontSize = 12.sp) }
+            // Column 3: Score and special buttons
+            Column(
+                modifier = Modifier.weight(0.8f),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(horizontalAlignment = Alignment.End) {
+                    // Score on one line
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Text("Score: ", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = score.toString(),
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
+                }
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Sweet Spot Bonus button
+                    Button(
+                        onClick = onSweetSpotBonus,
+                        enabled = !sweetSpotBonusEntered,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (sweetSpotBonusEntered) Color(0xFF9E9E9E) else warningOrange,
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("SWEET SPOT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+
+                    // All Rollers button
+                    Button(
+                        onClick = onAllRollersToggle,
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (allRollersEnabled) successGreen else Color(0xFF9E9E9E),
+                            contentColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("ALL ROLLERS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun GreedyBoard(
-    rotationDegrees: Int,
+private fun GreedyScoringCard(
     activeButtons: Set<String>,
     throwZone: Int,
     onPress: (String) -> Unit,
+    fieldFlipped: Boolean,
+    rotationDegrees: Int,
+    anyButtonClicked: Boolean,
+    onNextThrowZoneCounterClockwise: () -> Unit,
+    onNextThrowZoneClockwise: () -> Unit,
+    isClockwiseDisabled: Boolean,
+    isCounterClockwiseDisabled: Boolean,
     modifier: Modifier = Modifier
 ) {
     Card(shape = RoundedCornerShape(18.dp), elevation = 8.dp, modifier = modifier) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            // Use responsive padding/spacing so we never clip the 3x3 grid.
-            val minSide = minOf(maxWidth, maxHeight)
-            val outerPadding = (minSide * 0.06f).coerceIn(8.dp, 16.dp)
-            val cellGap = (minSide * 0.04f).coerceIn(6.dp, 12.dp)
-            val gridSize = (minSide - outerPadding * 2)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Calculate button positions based on rotation
+            // Rotation is clockwise around the Sweet Spot (middle row, col3)
+            // 0°: X=top-col2, Y=top-col3, Z=top-col4
+            // 90°: X=top-col4, Y=mid-col4, Z=bot-col4
+            // 180°: X=bot-col4, Y=bot-col3, Z=bot-col2
+            // 270°: X=bot-col2, Y=mid-col2, Z=top-col2
+            val normalizedRotation = ((rotationDegrees % 360) + 360) % 360
+            val rotationSteps = (normalizedRotation / 90) % 4
 
-             // Visual rotation like the React implementation:
-             // - rotate the square
-             // - counter-rotate the text so labels remain upright
-             Box(
-                 modifier = Modifier
-                    .padding(outerPadding)
-                    .size(gridSize)
-                     .graphicsLayer {
-                         rotationZ = rotationDegrees.toFloat()
-                         transformOrigin = TransformOrigin(0.5f, 0.5f)
-                     }
-             ) {
-                 // Square (3x3)
-                 Column(
-                    verticalArrangement = Arrangement.spacedBy(cellGap),
-                     modifier = Modifier.matchParentSize()
-                 ) {
-                     for (r in 0..2) {
-                         Row(
-                             modifier = Modifier
-                                 .fillMaxWidth()
-                                 .weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(cellGap)
-                         ) {
-                             for (c in 0..2) {
-                                 val label = when {
-                                     r == 0 && c == 0 -> "X"
-                                     r == 0 && c == 1 -> "Y"
-                                     r == 0 && c == 2 -> "Z"
-                                     r == 1 && c == 1 -> "Sweet Spot"
-                                     else -> ""
-                                 }
-                                 val clicked = label.isNotBlank() && label in activeButtons
-                                 val enabled = label.isNotBlank() && !(throwZone == 4 && "Sweet Spot" in activeButtons && label != "Sweet Spot")
+            // Define button positions: (row, column, buttonLabel)
+            // row: 0=top, 1=middle, 2=bottom; column: 1-5
+            data class ButtonPosition(val row: Int, val col: Int, val label: String)
 
-                                 Box(
-                                     modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                     contentAlignment = Alignment.Center
-                                 ) {
-                                     if (label.isNotBlank()) {
-                                         Button(
-                                             onClick = { onPress(label) },
-                                             enabled = enabled,
-                                             colors = ButtonDefaults.buttonColors(
-                                                 backgroundColor = if (clicked) successGreen else greedyPink,
-                                                 contentColor = Color.White
-                                             ),
-                                             modifier = Modifier.fillMaxSize()
-                                         ) {
-                                             Text(
-                                                 label,
-                                                 fontWeight = FontWeight.Bold,
-                                                 textAlign = TextAlign.Center,
-                                                 modifier = Modifier.graphicsLayer {
-                                                     rotationZ = -rotationDegrees.toFloat()
-                                                },
-                                                // keep labels from wrapping/clipping on small grids
-                                                maxLines = 1
-                                             )
-                                         }
-                                     }
-                                 }
-                             }
-                         }
-                     }
-                 }
-             }
-         }
-     }
+            val buttonPositions = when (rotationSteps) {
+                0 -> listOf(
+                    ButtonPosition(0, 2, "X"),
+                    ButtonPosition(0, 3, "Y"),
+                    ButtonPosition(0, 4, "Z")
+                )
+                1 -> listOf(
+                    ButtonPosition(0, 4, "X"),
+                    ButtonPosition(1, 4, "Y"),
+                    ButtonPosition(2, 4, "Z")
+                )
+                2 -> listOf(
+                    ButtonPosition(2, 4, "X"),
+                    ButtonPosition(2, 3, "Y"),
+                    ButtonPosition(2, 2, "Z")
+                )
+                3 -> listOf(
+                    ButtonPosition(2, 2, "X"),
+                    ButtonPosition(1, 2, "Y"),
+                    ButtonPosition(0, 2, "Z")
+                )
+                else -> listOf(
+                    ButtonPosition(0, 2, "X"),
+                    ButtonPosition(0, 3, "Y"),
+                    ButtonPosition(0, 4, "Z")
+                )
+            }
+
+            // When flipped, reverse the row order for the display (top becomes bottom)
+            // but we need to maintain the actual row indices for button positioning
+            val displayRowOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
+
+            displayRowOrder.forEach { displayRowIndex ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth().weight(if (displayRowIndex == 1) 1.5f else 1f)
+                ) {
+                    for (colIndex in 1..5) {
+                        when {
+                            // <-Next button ALWAYS in ACTUAL middle row (row 1), column 1 - unaffected by flip
+                            displayRowIndex == 1 && colIndex == 1 -> {
+                                Button(
+                                    onClick = onNextThrowZoneCounterClockwise,
+                                    enabled = throwZone < 4 && anyButtonClicked && !isCounterClockwiseDisabled,
+                                    colors = ButtonDefaults.buttonColors(
+                                        backgroundColor = if (throwZone < 4 && anyButtonClicked && !isCounterClockwiseDisabled) Color(0xFF6750A4) else Color(0xFF9E9E9E),
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("<-Next", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                            // Sweet Spot ALWAYS in ACTUAL middle row (row 1), column 3 - unaffected by flip
+                            displayRowIndex == 1 && colIndex == 3 -> {
+                                val clickedSweetSpot = "Sweet Spot" in activeButtons
+                                val enabledSweetSpot = !(throwZone == 4 && "Sweet Spot" in activeButtons)
+                                Button(
+                                    onClick = { onPress("Sweet Spot") },
+                                    enabled = enabledSweetSpot,
+                                    colors = ButtonDefaults.buttonColors(
+                                        backgroundColor = if (clickedSweetSpot) successGreen else greedyPink,
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                ) {
+                                    Text("Sweet Spot", fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                                }
+                            }
+                            // Next-> button ALWAYS in ACTUAL middle row (row 1), column 5 - unaffected by flip
+                            displayRowIndex == 1 && colIndex == 5 -> {
+                                Button(
+                                    onClick = onNextThrowZoneClockwise,
+                                    enabled = throwZone < 4 && anyButtonClicked && !isClockwiseDisabled,
+                                    colors = ButtonDefaults.buttonColors(
+                                        backgroundColor = if (throwZone < 4 && anyButtonClicked && !isClockwiseDisabled) Color(0xFF6750A4) else Color(0xFF9E9E9E),
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Next->", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                            // Regular scoring buttons (X, Y, Z) - these ARE affected by flip
+                            else -> {
+                                // Map the display row back to the actual button position row for lookup
+                                val actualRowForButtonLookup = if (fieldFlipped) {
+                                    // When flipped, invert the row index for button positions
+                                    2 - displayRowIndex
+                                } else {
+                                    displayRowIndex
+                                }
+
+                                val buttonAtPos = buttonPositions.find { it.row == actualRowForButtonLookup && it.col == colIndex }
+                                if (buttonAtPos != null) {
+                                    val clicked = buttonAtPos.label in activeButtons
+                                    val enabled = !(throwZone == 4 && "Sweet Spot" in activeButtons)
+                                    Button(
+                                        onClick = { onPress(buttonAtPos.label) },
+                                        enabled = enabled,
+                                        colors = ButtonDefaults.buttonColors(
+                                            backgroundColor = if (clicked) successGreen else greedyPink,
+                                            contentColor = Color.White
+                                        ),
+                                        modifier = Modifier.weight(1f).fillMaxHeight()
+                                    ) {
+                                        Text(buttonAtPos.label, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                } else {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -547,43 +799,210 @@ private fun GreedyZoneControlCard(
 }
 
 @Composable
-private fun GreedyControlRow(
-     timerRunning: Boolean,
-     onToggleTimer: () -> Unit,
-     onReset: () -> Unit,
- ) {
-     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
-         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                 Button(
-                     onClick = onToggleTimer,
-                     colors = ButtonDefaults.buttonColors(backgroundColor = if (timerRunning) warningOrange else infoBlue)
-                 ) {
-                     Text(if (timerRunning) "Stop Timer" else "Timer", color = Color.White)
-                 }
-                 Button(onClick = onReset, colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFB3261E))) {
-                     Text("Reset", color = Color.White)
-                 }
-                 Spacer(modifier = Modifier.weight(1f))
-             }
-         }
-     }
- }
+private fun GreedyControlCard(
+    timerRunning: Boolean,
+    onToggleTimer: () -> Unit,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Top row: TIMER and PAUSE buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { if (!timerRunning) onToggleTimer() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("▶", fontSize = 16.sp)
+                        Text("TIMER", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = { if (timerRunning) onToggleTimer() },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⏸", fontSize = 16.sp)
+                        Text("PAUSE", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            // Bottom row: EDIT and RESET buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { /* Edit - placeholder */ },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✎", fontSize = 16.sp)
+                        Text("EDIT", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+
+                Button(
+                    onClick = onReset,
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF00BCD4), // Cyan
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("↻", fontSize = 16.sp)
+                        Text("RESET", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun GreedyQueueCard(queue: List<GreedyParticipant>, modifier: Modifier = Modifier) {
-    Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(text = "Remaining (${queue.size})", fontWeight = FontWeight.Bold)
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+            Text(
+                text = "Queue (${queue.size})",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
             Spacer(modifier = Modifier.height(8.dp))
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(queue) { p ->
-                    Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                        Text("${p.handler} & ${p.dog}", fontWeight = FontWeight.SemiBold)
-                        if (p.utn.isNotBlank()) Text(p.utn, fontSize = 12.sp, color = Color.Gray)
-                        if (p.heightDivision.isNotBlank()) Text("Height: ${p.heightDivision}", fontSize = 12.sp, color = onSurfaceVariant)
+                items(queue) { participant ->
+                    val isCurrentTeam = queue.firstOrNull() == participant
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        Text(
+                            text = if (isCurrentTeam) "▶ ${participant.handler} & ${participant.dog}"
+                                   else "${participant.handler} & ${participant.dog}",
+                            fontSize = 11.sp,
+                            fontWeight = if (isCurrentTeam) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isCurrentTeam) Color(0xFF1976D2) else Color.Black
+                        )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GreedyTeamManagementCard(
+    onClearTeams: () -> Unit,
+    onImport: () -> Unit,
+    onAddTeam: () -> Unit,
+    onExport: () -> Unit,
+    onLog: () -> Unit,
+    onResetRound: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onClearTeams,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFF7B1FA2),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("CLEAR TEAMS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onImport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("IMPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onAddTeam,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("ADD TEAM", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onExport,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("EXPORT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+
+                Button(
+                    onClick = onLog,
+                    modifier = Modifier.weight(1f).height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF7B1FA2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("LOG", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Button(
+                onClick = onResetRound,
+                modifier = Modifier.fillMaxWidth().height(42.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFFD50000),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("RESET ROUND", fontWeight = FontWeight.Bold, fontSize = 11.sp)
             }
         }
     }
@@ -603,19 +1022,19 @@ private fun GreedyImportExportCard(
     Card(shape = RoundedCornerShape(16.dp), elevation = 6.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(text = "Actions", fontWeight = FontWeight.Bold)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = onImportClick, modifier = Modifier.fillMaxWidth()) { Text("Import") }
-                Button(onClick = onExportClick, modifier = Modifier.fillMaxWidth()) { Text("Export") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onImportClick, modifier = Modifier.weight(1f)) { Text("Import") }
+                Button(onClick = onExportClick, modifier = Modifier.weight(1f)) { Text("Export") }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = onExportCsvClick, modifier = Modifier.fillMaxWidth()) { Text("CSV") }
-                Button(onClick = onAddTeamClick, modifier = Modifier.fillMaxWidth()) { Text("Add") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onExportCsvClick, modifier = Modifier.weight(1f)) { Text("CSV") }
+                Button(onClick = onAddTeamClick, modifier = Modifier.weight(1f)) { Text("Add") }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = onPreviousParticipant, modifier = Modifier.fillMaxWidth()) { Text("Previous") }
-                Button(onClick = onSkipParticipant, modifier = Modifier.fillMaxWidth()) { Text("Skip") }
-                Button(onClick = onNextParticipant, modifier = Modifier.fillMaxWidth()) { Text("Next") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onPreviousParticipant, modifier = Modifier.weight(1f)) { Text("Previous") }
+                Button(onClick = onSkipParticipant, modifier = Modifier.weight(1f)) { Text("Skip") }
             }
+            Button(onClick = onNextParticipant, modifier = Modifier.fillMaxWidth()) { Text("Next") }
             Button(
                 onClick = onClearClick,
                 modifier = Modifier.fillMaxWidth(),
@@ -655,3 +1074,17 @@ private fun GreedyParticipantDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
+
+private fun greedyTimestamp(now: kotlinx.datetime.LocalDateTime): String {
+    fun pad2(n: Int) = n.toString().padStart(2, '0')
+    return buildString {
+        append(now.year)
+        append(pad2(now.monthNumber))
+        append(pad2(now.dayOfMonth))
+        append('_')
+        append(pad2(now.hour))
+        append(pad2(now.minute))
+        append(pad2(now.second))
+    }
+}
+

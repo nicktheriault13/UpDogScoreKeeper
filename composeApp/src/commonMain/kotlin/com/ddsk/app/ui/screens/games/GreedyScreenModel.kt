@@ -74,6 +74,9 @@ class GreedyScreenModel : ScreenModel {
     private val _allRollersEnabled = MutableStateFlow(false)
     val allRollersEnabled = _allRollersEnabled.asStateFlow()
 
+    private val _fieldFlipped = MutableStateFlow(false)
+    val fieldFlipped = _fieldFlipped.asStateFlow()
+
     // Zone rotation button states
     private val _isClockwiseDisabled = MutableStateFlow(false)
     val isClockwiseDisabled = _isClockwiseDisabled.asStateFlow()
@@ -543,6 +546,27 @@ class GreedyScreenModel : ScreenModel {
         return (listOf(header) + rows).joinToString("\n")
     }
 
+    fun exportLog(): String {
+        val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+        val participant = _participants.value.firstOrNull()
+        val header = buildString {
+            appendLine("=== Greedy Log ===")
+            appendLine("Exported: $now")
+            if (participant != null) {
+                appendLine("Current Participant: ${participant.handler} & ${participant.dog}")
+            }
+            appendLine("Throw Zone: ${_throwZone.value}")
+            appendLine("Score: ${_score.value}")
+            appendLine("Misses: ${_misses.value}")
+            appendLine("Sweet Spot Bonus: ${_sweetSpotBonus.value}")
+            appendLine("All Rollers: ${_allRollersEnabled.value}")
+            appendLine()
+            appendLine("=== Event Log ===")
+        }
+        val logEntries = _currentParticipantLog.value.joinToString("\n")
+        return header + logEntries
+    }
+
     fun addParticipant(handler: String, dog: String, utn: String, heightDivision: String = "") {
         val participant = GreedyParticipant(handler = handler, dog = dog, utn = utn, heightDivision = heightDivision)
         _participants.update {
@@ -561,5 +585,11 @@ class GreedyScreenModel : ScreenModel {
         pushUndo()
         _allRollersEnabled.update { !it }
         logEvent(if (_allRollersEnabled.value) "All Rollers enabled" else "All Rollers disabled")
+    }
+
+    fun flipField() {
+        pushUndo()
+        _fieldFlipped.update { !it }
+        logEvent("Field flipped")
     }
 }
