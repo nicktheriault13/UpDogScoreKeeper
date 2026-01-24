@@ -653,7 +653,7 @@ private fun FourWayGrid(
             val finalSpacing = interCellSpacing
 
             val rowOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
-            val colOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
+            val colOrder = if (fieldFlipped) listOf(3, 2, 1, 0, -1) else listOf(-1, 0, 1, 2, 3)
 
             Column(
                 modifier = Modifier
@@ -681,11 +681,21 @@ private fun FourWayGrid(
                                 contentAlignment = Alignment.Center
                             ) {
                                 when {
+                                    // Zone buttons in the 3x3 center grid
                                     row == 0 && col == 0 -> ZoneButton(1, 1 in clickedZones) { onZoneClick(1) }
                                     row == 0 && col == 2 -> ZoneButton(2, 2 in clickedZones) { onZoneClick(2) }
                                     row == 2 && col == 2 -> ZoneButton(3, 3 in clickedZones) { onZoneClick(3) }
                                     row == 2 && col == 0 -> ZoneButton(4, 4 in clickedZones) { onZoneClick(4) }
                                     row == 1 && col == 1 -> SweetSpotButton(sweetSpot, onSweetSpotClick)
+                                    // All other positions (including left column -1 and right column 3)
+                                    else -> {
+                                        // Empty space (light gray background)
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color(0xFFE0E0E0), RoundedCornerShape(12.dp))
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -988,38 +998,6 @@ private fun TimerCard(timerRunning: Boolean, modifier: Modifier = Modifier, onSt
                 }
             }
 
-            // Bottom row: EDIT and RESET buttons
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = { /* Edit */ },
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF00BCD4), // Cyan
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("✎", fontSize = 16.sp)
-                        Text("EDIT", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                    }
-                }
-
-                Button(
-                    onClick = { /* Reset */ },
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF00BCD4), // Cyan
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("↻", fontSize = 16.sp)
-                        Text("RESET", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                    }
-                }
-            }
 
             // Time Remaining display
             Text(
