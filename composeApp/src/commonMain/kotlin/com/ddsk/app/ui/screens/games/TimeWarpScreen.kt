@@ -1193,7 +1193,7 @@ private fun FieldGrid(
                                 Button(
                                     onClick = onSweetSpotClick,
                                     colors = androidx.compose.material.ButtonDefaults.buttonColors(
-                                        backgroundColor = if (sweetSpotClicked) Color(0xFF00C853) else Color(0xFF9E9E9E),
+                                        backgroundColor = if (sweetSpotClicked) Color(0xFF00C853) else Color(0xFFF500A1),
                                         contentColor = Color.White
                                     ),
                                     modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -1203,23 +1203,18 @@ private fun FieldGrid(
                                 }
                             }
                             c == 4 && r == 1 -> {
-                                // All Rollers button
-                                Button(
-                                    onClick = onAllRollersClick,
-                                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
-                                        backgroundColor = if (allRollersClicked) Color(0xFF00C853) else Color(0xFF9E9E9E),
-                                        contentColor = Color.White
-                                    ),
-                                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Text("All\nRollers", fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = TextAlign.Center)
-                                }
+                                // Empty space (light gray background)
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .background(Color(0xFFE0E0E0), RoundedCornerShape(12.dp))
+                                )
                             }
                             zoneNumber != null -> {
                                 // Zone button
                                 val clicked = clickedZones.contains(zoneNumber)
-                                val bg = if (clicked) Color(0xFF00C853) else Color(0xFF9E9E9E)
+                                val bg = if (clicked) Color(0xFF00C853) else Color(0xFFF500A1)
 
                                 Button(
                                     onClick = { onZoneClick(zoneNumber) },
@@ -1241,11 +1236,12 @@ private fun FieldGrid(
                                 }
                             }
                             else -> {
-                                // Empty space
+                                // Empty space (light gray background)
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxHeight()
+                                        .background(Color(0xFFE0E0E0), RoundedCornerShape(12.dp))
                                 )
                             }
                         }
