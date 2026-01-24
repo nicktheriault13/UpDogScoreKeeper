@@ -597,38 +597,6 @@ private fun ThrowNGoTimerCard(
                 }
             }
 
-            // Bottom row: EDIT and RESET buttons
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = { /* Edit */ },
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF00BCD4), // Cyan
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("✎", fontSize = 16.sp)
-                        Text("EDIT", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                    }
-                }
-
-                Button(
-                    onClick = { /* Reset */ },
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF00BCD4), // Cyan
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("↻", fontSize = 16.sp)
-                        Text("RESET", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                    }
-                }
-            }
 
             // Time Remaining display
             Text(

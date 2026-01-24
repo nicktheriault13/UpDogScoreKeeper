@@ -1,9 +1,10 @@
 package com.ddsk.app.ui.components
 
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.Icon
-import androidx.compose.material.IconButton
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.icons.Icons
@@ -20,6 +21,7 @@ import com.ddsk.app.ui.screens.MainScreen
  * Uses [Navigator.replaceAll] so we don't stack multiple pages when a user bounces
  * between games and home.
  */
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun GameHomeButton(
     navigator: Navigator,
@@ -31,14 +33,13 @@ fun GameHomeButton(
         shape = CircleShape,
         color = MaterialTheme.colors.primary,
         contentColor = MaterialTheme.colors.onPrimary,
-        elevation = 6.dp
+        elevation = 6.dp,
+        onClick = { navigator.replaceAll(MainScreen()) }
     ) {
-        IconButton(onClick = { navigator.replaceAll(MainScreen()) }) {
-            Icon(
-                imageVector = Icons.Filled.Home,
-                contentDescription = "Home",
-                modifier = Modifier.size(20.dp)
-            )
-        }
+        Icon(
+            imageVector = Icons.Filled.Home,
+            contentDescription = "Home",
+            modifier = Modifier.padding(8.dp).size(24.dp)
+        )
     }
 }
