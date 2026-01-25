@@ -104,6 +104,10 @@ object SevenUpScreen : Screen {
 
         // Separate audio player for the timer sound asset
         val timerAudioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("SevenUp") })
+        val currentAudioTime by timerAudioPlayer.currentTime.collectAsState()
+        val audioRemainingSeconds = remember(timerAudioPlayer.duration, currentAudioTime) {
+            ((timerAudioPlayer.duration - currentAudioTime) / 1000).coerceAtLeast(0)
+        }
 
         LaunchedEffect(audioTimerPlaying) {
             if (audioTimerPlaying) {
@@ -141,6 +145,7 @@ object SevenUpScreen : Screen {
                             timerRunning = timerRunning,
                             timeLeft = timeLeft.toDouble(),
                             audioTimerPlaying = audioTimerPlaying,
+                            audioRemainingSeconds = audioRemainingSeconds,
                             audioTimerProgress = if (audioTimerDuration > 0) audioTimerPosition.toFloat() / audioTimerDuration else 0f,
                             audioTimerLeft = ((audioTimerDuration - audioTimerPosition) / 1000).coerceAtLeast(0),
                             onCountdownStart = { screenModel.startCountdown() },
@@ -643,6 +648,7 @@ fun SevenUpTimerCard(
     timerRunning: Boolean,
     timeLeft: Double,
     audioTimerPlaying: Boolean,
+    audioRemainingSeconds: Int,
     audioTimerProgress: Float,
     audioTimerLeft: Long,
     onCountdownStart: () -> Unit,
@@ -652,7 +658,11 @@ fun SevenUpTimerCard(
     modifier: Modifier = Modifier
 ) {
     Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             // Top row: START TIMER and PAUSE buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
@@ -692,6 +702,29 @@ fun SevenUpTimerCard(
                 }
             }
 
+            // Time display - large and prominent
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (audioTimerPlaying) "${audioRemainingSeconds}s" else "Ready",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (audioTimerPlaying) Color(0xFF00BCD4) else Color.Gray,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                if (audioTimerPlaying) {
+                    Text(
+                        text = "Time Remaining",
+                        fontSize = 14.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
+            }
+
             // Middle row: EDIT and AUDIO TIMER buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
@@ -723,23 +756,6 @@ fun SevenUpTimerCard(
                         Text("AUDIO", fontWeight = FontWeight.Bold, fontSize = 10.sp)
                     }
                 }
-            }
-
-            // Time Remaining display
-            Text(
-                "Time: ${timeLeft.toString().take(5)}s",
-                fontSize = 11.sp,
-                color = Color.Gray,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
-
-            if (audioTimerPlaying) {
-                Text(
-                    "Audio: ${audioTimerLeft}s",
-                    fontSize = 11.sp,
-                    color = Color.Gray,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
             }
         }
     }

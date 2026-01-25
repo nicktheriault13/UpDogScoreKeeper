@@ -28,6 +28,7 @@ import kotlinx.serialization.decodeFromString
 @Serializable
 data class TimeWarpUiState(
     val score: Int = 0,
+    val timeScore: Int = 0, // Tracks time contribution to score separately
     val misses: Int = 0,
     val ob: Int = 0,
     val clickedZones: Set<Int> = emptySet(),
@@ -75,6 +76,7 @@ class TimeWarpScreenModel : ScreenModel {
     @Serializable
     private data class UndoSnapshot(
         val score: Int,
+        val timeScore: Int,
         val misses: Int,
         val ob: Int,
         val clickedZones: Set<Int>,
@@ -95,6 +97,7 @@ class TimeWarpScreenModel : ScreenModel {
         undoStack.addLast(
             UndoSnapshot(
                 score = s.score,
+                timeScore = s.timeScore,
                 misses = s.misses,
                 ob = s.ob,
                 clickedZones = s.clickedZones,
@@ -125,6 +128,7 @@ class TimeWarpScreenModel : ScreenModel {
         _uiState.update {
             it.copy(
                 score = snap.score,
+                timeScore = snap.timeScore,
                 misses = snap.misses,
                 ob = snap.ob,
                 clickedZones = snap.clickedZones,
@@ -363,6 +367,7 @@ class TimeWarpScreenModel : ScreenModel {
         _uiState.update { s ->
             s.copy(
                 score = 0,
+                timeScore = 0,
                 misses = 0,
                 ob = 0,
                 clickedZones = emptySet(),
@@ -414,16 +419,20 @@ class TimeWarpScreenModel : ScreenModel {
 
     /**
      * Stops the countdown and adds the remaining time (rounded to nearest whole second) to the score.
+     * Replaces any previously added time score.
      */
     fun stopCountdownAndAddScore() {
         timerJob?.cancel()
         val remaining = _uiState.value.timeRemaining
-        val add = remaining.roundToInt().coerceAtLeast(0)
+        val newTimeScore = remaining.roundToInt().coerceAtLeast(0)
         pushUndoSnapshot()
         _uiState.update { s ->
+            // Remove old timeScore from total, add new timeScore
+            val newTotalScore = s.score - s.timeScore + newTimeScore
             s.copy(
                 isTimerRunning = false,
-                score = s.score + add,
+                score = newTotalScore,
+                timeScore = newTimeScore,
                 timeRemaining = remaining
             )
         }
@@ -432,18 +441,21 @@ class TimeWarpScreenModel : ScreenModel {
     }
 
     /**
-     * For manual entry via long-press: sets timeRemaining and adds that value (rounded) to score.
+     * For manual entry via long-press: sets timeRemaining and replaces the time score (not cumulative).
      */
     fun applyManualTimeAndAddScore(timeStr: String) {
         val newTime = timeStr.toFloatOrNull() ?: return
         timerJob?.cancel()
-        val add = newTime.roundToInt().coerceAtLeast(0)
+        val newTimeScore = newTime.roundToInt().coerceAtLeast(0)
         pushUndoSnapshot()
         _uiState.update { s ->
+            // Remove old timeScore from total, add new timeScore
+            val newTotalScore = s.score - s.timeScore + newTimeScore
             s.copy(
                 timeRemaining = newTime,
                 isTimerRunning = false,
-                score = s.score + add
+                score = newTotalScore,
+                timeScore = newTimeScore
             )
         }
         refreshCanUndo()

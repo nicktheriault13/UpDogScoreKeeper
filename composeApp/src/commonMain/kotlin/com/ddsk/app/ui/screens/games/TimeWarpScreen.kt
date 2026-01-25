@@ -129,6 +129,10 @@ object TimeWarpScreen : Screen {
 
         // Audio timer setup
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Time Warp") })
+        val currentAudioTime by audioPlayer.currentTime.collectAsState()
+        val audioRemainingSeconds = remember(audioPlayer.duration, currentAudioTime) {
+            ((audioPlayer.duration - currentAudioTime) / 1000).coerceAtLeast(0)
+        }
 
         LaunchedEffect(isAudioTimerPlaying) {
             if (isAudioTimerPlaying) {
@@ -179,6 +183,7 @@ object TimeWarpScreen : Screen {
                     // Right: Timer card
                     TimeWarpTimerCard(
                         isAudioTimerPlaying = isAudioTimerPlaying,
+                        timeLeft = audioRemainingSeconds,
                         onTimerAudioToggle = screenModel::toggleAudioTimer,
                         modifier = Modifier.weight(1f).fillMaxHeight()
                     )
@@ -464,17 +469,25 @@ object TimeWarpScreen : Screen {
         }
 
         if (showTimeInput) {
-            var timeText by remember { mutableStateOf(timeRemaining.toString()) }
+            var timeText by remember { mutableStateOf("") }
             AlertDialog(
                 onDismissRequest = { showTimeInput = false },
                 title = { Text("Set Time Remaining") },
                 text = {
-                    TextField(
-                        value = timeText,
-                        onValueChange = { timeText = it },
-                        label = { Text("Seconds") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Enter the time remaining in seconds (e.g., 11.50).\nThis value will be added to your score.",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                        TextField(
+                            value = timeText,
+                            onValueChange = { timeText = it },
+                            label = { Text("Seconds") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            placeholder = { Text("e.g., 11.50") }
+                        )
+                    }
                 },
                 confirmButton = {
                     Button(onClick = {
@@ -716,11 +729,16 @@ private fun TimeWarpHeaderCard(
 @Composable
 private fun TimeWarpTimerCard(
     isAudioTimerPlaying: Boolean,
+    timeLeft: Int,
     onTimerAudioToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             // Top row: TIMER and PAUSE buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
@@ -751,6 +769,29 @@ private fun TimeWarpTimerCard(
                         Text("⏸", fontSize = 16.sp)
                         Text("PAUSE", fontWeight = FontWeight.Bold, fontSize = 10.sp)
                     }
+                }
+            }
+
+            // Time display - large and prominent
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (isAudioTimerPlaying) "${timeLeft}s" else "Ready",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isAudioTimerPlaying) Color(0xFF00BCD4) else Color.Gray,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                if (isAudioTimerPlaying) {
+                    Text(
+                        text = "Time Remaining",
+                        fontSize = 14.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
                 }
             }
         }

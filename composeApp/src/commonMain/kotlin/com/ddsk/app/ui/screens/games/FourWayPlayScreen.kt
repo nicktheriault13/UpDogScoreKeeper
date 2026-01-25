@@ -118,6 +118,10 @@ object FourWayPlayScreen : Screen {
         }
 
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("4-Way Play") })
+        val currentAudioTime by audioPlayer.currentTime.collectAsState()
+        val audioRemainingSeconds = remember(audioPlayer.duration, currentAudioTime) {
+            ((audioPlayer.duration - currentAudioTime) / 1000).coerceAtLeast(0)
+        }
 
         LaunchedEffect(timerRunning) {
             if (timerRunning) {
@@ -161,6 +165,7 @@ object FourWayPlayScreen : Screen {
                     ) {
                         TimerCard(
                             timerRunning = timerRunning,
+                            timeLeft = audioRemainingSeconds,
                             modifier = Modifier.fillMaxWidth(),
                             onStartStop = { timerRunning = !timerRunning }
                         )
@@ -962,9 +967,13 @@ private fun RowScope.ControlActionButton(
 }
 
 @Composable
-private fun TimerCard(timerRunning: Boolean, modifier: Modifier = Modifier, onStartStop: () -> Unit) {
+private fun TimerCard(timerRunning: Boolean, timeLeft: Int, modifier: Modifier = Modifier, onStartStop: () -> Unit) {
     Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             // Top row: TIMER and PAUSE buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
@@ -998,14 +1007,28 @@ private fun TimerCard(timerRunning: Boolean, modifier: Modifier = Modifier, onSt
                 }
             }
 
-
-            // Time Remaining display
-            Text(
-                "Time Remaining: 0:33:25",
-                fontSize = 11.sp,
-                color = Color.Gray,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
+            // Time display - large and prominent
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (timerRunning) "${timeLeft}s" else "Ready",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (timerRunning) Color(0xFF00BCD4) else Color.Gray,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                if (timerRunning) {
+                    Text(
+                        text = "Time Remaining",
+                        fontSize = 14.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
+            }
         }
     }
 }

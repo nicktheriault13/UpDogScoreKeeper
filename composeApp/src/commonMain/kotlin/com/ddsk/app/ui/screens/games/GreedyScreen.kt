@@ -114,6 +114,10 @@ object GreedyScreen : Screen {
         // Audio timer: use same as the React page (FunKey-like 75s)
         val timerRunning = remember { mutableStateOf(false) }
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Greedy") })
+        val currentAudioTime by audioPlayer.currentTime.collectAsState()
+        val audioRemainingSeconds = remember(audioPlayer.duration, currentAudioTime) {
+            ((audioPlayer.duration - currentAudioTime) / 1000).coerceAtLeast(0)
+        }
 
         LaunchedEffect(timerRunning.value) {
             if (timerRunning.value) audioPlayer.play() else audioPlayer.stop()
@@ -151,6 +155,7 @@ object GreedyScreen : Screen {
                         // Right: Timer/Control
                         GreedyControlCard(
                             timerRunning = timerRunning.value,
+                            timeLeft = audioRemainingSeconds,
                             onToggleTimer = { timerRunning.value = !timerRunning.value },
                             onReset = screenModel::reset,
                             modifier = Modifier.weight(1f).fillMaxWidth()
@@ -747,7 +752,13 @@ private fun GreedyScoringCard(
                                         Text(buttonAtPos.label, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                                     }
                                 } else {
-                                    Spacer(modifier = Modifier.weight(1f))
+                                    // Empty space (light gray background)
+                                    androidx.compose.foundation.layout.Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .background(Color(0xFFE0E0E0), RoundedCornerShape(12.dp))
+                                    )
                                 }
                             }
                         }
@@ -801,12 +812,17 @@ private fun GreedyZoneControlCard(
 @Composable
 private fun GreedyControlCard(
     timerRunning: Boolean,
+    timeLeft: Int,
     onToggleTimer: () -> Unit,
     onReset: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             // Top row: TIMER and PAUSE buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
@@ -837,6 +853,29 @@ private fun GreedyControlCard(
                         Text("⏸", fontSize = 16.sp)
                         Text("PAUSE", fontWeight = FontWeight.Bold, fontSize = 10.sp)
                     }
+                }
+            }
+
+            // Time display - large and prominent
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (timerRunning) "${timeLeft}s" else "Ready",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (timerRunning) Color(0xFF00BCD4) else Color.Gray,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                if (timerRunning) {
+                    Text(
+                        text = "Time Remaining",
+                        fontSize = 14.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
                 }
             }
 

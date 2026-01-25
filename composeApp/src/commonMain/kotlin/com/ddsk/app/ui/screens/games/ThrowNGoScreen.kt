@@ -99,6 +99,10 @@ object ThrowNGoScreen : Screen {
         }
 
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Throw N Go") })
+        val currentAudioTime by audioPlayer.currentTime.collectAsState()
+        val audioRemainingSeconds = remember(audioPlayer.duration, currentAudioTime) {
+            ((audioPlayer.duration - currentAudioTime) / 1000).coerceAtLeast(0)
+        }
 
         LaunchedEffect(timerRunning) {
             if (timerRunning) {
@@ -134,7 +138,7 @@ object ThrowNGoScreen : Screen {
                         // Right: Timer only
                         ThrowNGoTimerCard(
                             timerRunning = timerRunning,
-                            timeLeft = timeLeft,
+                            timeLeft = audioRemainingSeconds,
                             onStartStop = { if (timerRunning) screenModel.stopTimer() else screenModel.startTimer() },
                             modifier = Modifier.weight(1f).fillMaxWidth()
                         )
@@ -563,7 +567,11 @@ private fun ThrowNGoTimerCard(
     modifier: Modifier = Modifier
 ) {
     Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             // Top row: TIMER and PAUSE buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
@@ -597,14 +605,28 @@ private fun ThrowNGoTimerCard(
                 }
             }
 
-
-            // Time Remaining display
-            Text(
-                "Time Remaining: ${timeLeft}s",
-                fontSize = 11.sp,
-                color = Color.Gray,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
+            // Time display - large and prominent
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (timerRunning) "${timeLeft}s" else "Ready",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (timerRunning) Color(0xFF00BCD4) else Color.Gray,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                if (timerRunning) {
+                    Text(
+                        text = "Time Remaining",
+                        fontSize = 14.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
+            }
         }
     }
 }

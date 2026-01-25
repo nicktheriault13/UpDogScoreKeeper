@@ -113,6 +113,10 @@ object FarOutScreen : Screen {
         }
 
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Far Out") })
+        val currentAudioTime by audioPlayer.currentTime.collectAsState()
+        val audioRemainingSeconds = remember(audioPlayer.duration, currentAudioTime) {
+            ((audioPlayer.duration - currentAudioTime) / 1000).coerceAtLeast(0)
+        }
         val timerDisplay = state.timerDisplay
 
         LaunchedEffect(timerDisplay.isRunning, timerDisplay.isPaused) {
@@ -155,6 +159,7 @@ object FarOutScreen : Screen {
                         // Right: Timer only
                         FarOutTimerCard(
                             timer = state.timerDisplay,
+                            timeLeft = audioRemainingSeconds,
                             onStartTimer = {
                                 logButtonPress("Start Timer")
                                 screenModel.startTimer()
@@ -581,13 +586,18 @@ private fun FarOutHeaderCard(
 @Composable
 private fun FarOutTimerCard(
     timer: TimerDisplay,
+    timeLeft: Int,
     onStartTimer: () -> Unit,
     onPauseTimer: () -> Unit,
     onStopTimer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             // Top row: START and PAUSE buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
@@ -624,6 +634,29 @@ private fun FarOutTimerCard(
                 }
             }
 
+            // Time display - large and prominent
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (timer.isRunning) "${timeLeft}s" else "Ready",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (timer.isRunning) Color(0xFF00BCD4) else Color.Gray,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                if (timer.isRunning) {
+                    Text(
+                        text = "Time Remaining",
+                        fontSize = 14.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
+            }
+
             // Bottom row: STOP button
             Button(
                 onClick = onStopTimer,
@@ -642,14 +675,6 @@ private fun FarOutTimerCard(
                     Text("STOP", fontWeight = FontWeight.Bold, fontSize = 10.sp)
                 }
             }
-
-            // Time Remaining display
-            Text(
-                "Time: ${timer.secondsRemaining}s",
-                fontSize = 11.sp,
-                color = Color.Gray,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
         }
     }
 }

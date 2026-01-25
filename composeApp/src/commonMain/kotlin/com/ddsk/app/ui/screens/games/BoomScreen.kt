@@ -840,7 +840,12 @@ private fun BoomGrid(
                                     SweetSpotCell(uiState = uiState, onToggle = screenModel::toggleSweetSpot)
                                 }
                                 GridCellContent.Empty -> {
-                                    Spacer(modifier = Modifier.weight(1f).fillMaxHeight())
+                                    androidx.compose.foundation.layout.Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .background(Color(0xFFE0E0E0), RoundedCornerShape(12.dp))
+                                    )
                                 }
                             }
                         }
