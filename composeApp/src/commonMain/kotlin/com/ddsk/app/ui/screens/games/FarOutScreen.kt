@@ -656,25 +656,6 @@ private fun FarOutTimerCard(
                     )
                 }
             }
-
-            // Bottom row: STOP button
-            Button(
-                onClick = onStopTimer,
-                enabled = timer.isRunning || timer.secondsRemaining != 90,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = Color(0xFFD50000), // Red
-                    contentColor = Color.White,
-                    disabledBackgroundColor = Color(0xFF9E9E9E),
-                    disabledContentColor = Color.White
-                ),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("⏹", fontSize = 16.sp)
-                    Text("STOP", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                }
-            }
         }
     }
 }

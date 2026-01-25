@@ -54,6 +54,7 @@ data class SevenUpParticipant(
 @Serializable
 data class SevenUpUiState(
     val score: Int = 0,
+    val timeScore: Int = 0, // Tracks time contribution to score separately
     val jumpCounts: Map<String, Int> = emptyMap(),
     val disabledJumps: Set<String> = emptySet(),
     // Track which jump buttons should be highlighted as 'clicked' since the last non-jump.
@@ -68,9 +69,6 @@ data class SevenUpUiState(
     val isFlipped: Boolean = false,
     val timeRemaining: Float = 60.0f,
     val isTimerRunning: Boolean = false,
-    // Tracks how many manual time edits have occurred this round. Used to prevent doubling score additions
-    // when the user edits time multiple times.
-    val manualTimeEdits: Int = 0,
     val activeParticipant: SevenUpParticipant? = null,
     val queue: List<SevenUpParticipant> = emptyList(),
     val completed: List<SevenUpParticipant> = emptyList(),
@@ -132,8 +130,48 @@ class SevenUpScreenModel : ScreenModel {
         audioTimerPlaying.update { !it }
     }
 
+    // JSON Export data classes
+    @Serializable
+    data class SevenUpPendingJsonExport(
+        val filename: String,
+        val content: String
+    )
+
+    @Serializable
+    private data class SevenUpParticipantData(
+        val handler: String,
+        val dog: String,
+        val utn: String,
+        val completedAt: String
+    )
+
+    @Serializable
+    private data class SevenUpRoundResults(
+        val finalScore: Int,
+        val timeRemaining: Float,
+        val jumpSum: Int,
+        val nonJumpSum: Int,
+        val jumpCounts: Map<String, Int>,
+        val markedCells: Map<String, Int>,
+        val sweetSpotBonus: Boolean,
+        val allRollersEnabled: Boolean
+    )
+
+    @Serializable
+    private data class SevenUpRoundExport(
+        val gameMode: String,
+        val exportTimestamp: String,
+        val participantData: SevenUpParticipantData,
+        val roundResults: SevenUpRoundResults,
+        val roundLog: List<String> = emptyList()
+    )
+
     private val _pendingJsonExport = MutableStateFlow<SevenUpPendingJsonExport?>(null)
     val pendingJsonExport: StateFlow<SevenUpPendingJsonExport?> = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
 
     private val exportJson = Json {
         prettyPrint = true
@@ -206,6 +244,7 @@ class SevenUpScreenModel : ScreenModel {
         _uiState.update {
             it.copy(
                 score = 0,
+                timeScore = 0,
                 jumpCounts = emptyMap(),
                 disabledJumps = emptySet(),
                 jumpsClickedSinceLastNonJump = emptySet(),
@@ -217,7 +256,6 @@ class SevenUpScreenModel : ScreenModel {
                 hasStarted = false,
                 timeRemaining = 60.0f,
                 isTimerRunning = false,
-                manualTimeEdits = 0,
                 currentRoundLog = emptyList(),
                 allRollers = false
             )
@@ -226,6 +264,7 @@ class SevenUpScreenModel : ScreenModel {
 
     fun setAllRollers(enabled: Boolean) {
         _uiState.update { it.copy(allRollers = enabled) }
+        logEvent(if (enabled) "All Rollers enabled" else "All Rollers disabled")
         persistState()
     }
 
@@ -251,6 +290,7 @@ class SevenUpScreenModel : ScreenModel {
              if (it.activeParticipant == null) it.copy(activeParticipant = p)
              else it.copy(queue = it.queue + p)
         }
+        logEvent("Team added: $handler & $dog")
         persistState()
     }
 
@@ -262,6 +302,7 @@ class SevenUpScreenModel : ScreenModel {
                 completed = emptyList()
             )
         }
+        logEvent("All participants cleared")
         persistState()
     }
 
@@ -275,22 +316,20 @@ class SevenUpScreenModel : ScreenModel {
 
         timerJob?.cancel()
 
+        // Calculate new time score (rounded to nearest whole number)
+        val newTimeScore = kotlin.math.round(newTime).toInt().coerceAtLeast(0)
+
         _uiState.update { state ->
-            // Requirement: "when it is editted then add the value entered rounded to the nearest whole number to the score"
-            // If they edit multiple times, add the *delta* from the last edit to avoid double-counting.
-            val enteredPoints = kotlin.math.round(newTime).toInt()
-
-            val priorEdits = state.manualTimeEdits
-            val priorPointsAccounted = if (priorEdits <= 0) 0 else kotlin.math.round(state.timeRemaining).toInt()
-            val delta = enteredPoints - priorPointsAccounted
-
+            // Remove old timeScore from total, add new timeScore (replacement, not cumulative)
+            val newTotalScore = state.score - state.timeScore + newTimeScore
             state.copy(
                 timeRemaining = newTime,
                 isTimerRunning = false,
-                manualTimeEdits = priorEdits + 1,
-                score = state.score + delta
+                score = newTotalScore,
+                timeScore = newTimeScore
             )
         }
+        logEvent("Manual time entry: %.2f seconds (+%d pts)".format(newTime, newTimeScore))
         persistState()
     }
 
@@ -300,6 +339,7 @@ class SevenUpScreenModel : ScreenModel {
     fun startTimer() {
         if (!_uiState.value.isTimerRunning) {
             _uiState.update { it.copy(isTimerRunning = true) }
+            logEvent("Timer started")
             val startTimeMark = TimeSource.Monotonic.markNow()
             val initialTimeOnStart = _uiState.value.timeRemaining
             timerJob = scope.launch {
@@ -318,14 +358,21 @@ class SevenUpScreenModel : ScreenModel {
 
     fun stopTimer() {
         timerJob?.cancel()
+
+        val remaining = _uiState.value.timeRemaining
+        val newTimeScore = kotlin.math.round(remaining).toInt().coerceAtLeast(0)
+
         _uiState.update { state ->
-            val roundedForScore = kotlin.math.round(state.timeRemaining).toInt()
+            // Remove old timeScore from total, add new timeScore (replacement, not cumulative)
+            val newTotalScore = state.score - state.timeScore + newTimeScore
             state.copy(
                 isTimerRunning = false,
-                timeRemaining = roundToHundredths(state.timeRemaining),
-                score = state.score + roundedForScore
+                timeRemaining = roundToHundredths(remaining),
+                score = newTotalScore,
+                timeScore = newTimeScore
             )
         }
+        logEvent("Timer stopped with %.2f seconds remaining (+%d pts)".format(remaining, newTimeScore))
         persistState()
     }
 
@@ -335,7 +382,9 @@ class SevenUpScreenModel : ScreenModel {
 
     fun toggleGridVersion() {
          if (!_uiState.value.hasStarted) {
-            _uiState.update { it.copy(rectangleVersion = (it.rectangleVersion + 1) % 11) }
+            val newVersion = (_uiState.value.rectangleVersion + 1) % 11
+            _uiState.update { it.copy(rectangleVersion = newVersion) }
+            logEvent("Grid version changed to ${newVersion + 1}")
             persistState()
         }
     }
@@ -363,6 +412,7 @@ class SevenUpScreenModel : ScreenModel {
                 markedCells = transformedMarkedCells
             )
         }
+        logEvent("Field flipped")
         persistState()
     }
 
@@ -405,6 +455,7 @@ class SevenUpScreenModel : ScreenModel {
                         lastWasNonJump = false
                     )
                 }
+                logEvent("Jump clicked: $jumpId (first jump, +3 pts)")
                 persistState()
                 return
             }
@@ -422,6 +473,7 @@ class SevenUpScreenModel : ScreenModel {
                     lastWasNonJump = false
                 )
             }
+            logEvent("Jump clicked: $jumpId (+3 pts)")
             persistState()
             return
         }
@@ -448,6 +500,16 @@ class SevenUpScreenModel : ScreenModel {
                 lastWasNonJump = true
             )
         }
+
+        // Log the non-jump click with appropriate message
+        val logMessage = if (_uiState.value.nonJumpMark == 6 && label == "Sweet Spot") {
+            "Non-jump clicked: Sweet Spot (5th mark, +8 pts, BONUS!)"
+        } else if (label == "Sweet Spot") {
+            "Non-jump clicked: Sweet Spot (+1 pt)"
+        } else {
+            "Non-jump clicked: cell($row,$col) (+1 pt)"
+        }
+        logEvent(logMessage)
         persistState()
     }
 
@@ -487,6 +549,19 @@ class SevenUpScreenModel : ScreenModel {
         persistState()
     }
 
+    private fun exportStamp(dt: kotlinx.datetime.LocalDateTime): String {
+        fun pad2(n: Int) = n.toString().padStart(2, '0')
+        return buildString {
+            append(dt.year)
+            append(pad2(dt.monthNumber))
+            append(pad2(dt.dayOfMonth))
+            append('_')
+            append(pad2(dt.hour))
+            append(pad2(dt.minute))
+            append(pad2(dt.second))
+        }
+    }
+
     fun nextParticipant() {
         val state = _uiState.value
         val active = state.activeParticipant
@@ -496,9 +571,45 @@ class SevenUpScreenModel : ScreenModel {
         if (active != null) {
             val jumpSum = state.jumpCounts.values.sum()
             val nonJumpSum = state.markedCells.size
-            val completedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+            val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
 
-            // Log logic here?
+            // Generate JSON export before advancing
+            runCatching {
+                val stamp = exportStamp(now)
+                val safeHandler = active.handler.replace("\\s+".toRegex(), "")
+                val safeDog = active.dog.replace("\\s+".toRegex(), "")
+                val filename = "SevenUp_${safeHandler}_${safeDog}_$stamp.json"
+
+                val exportData = SevenUpRoundExport(
+                    gameMode = "SevenUp",
+                    exportTimestamp = Clock.System.now().toString(),
+                    participantData = SevenUpParticipantData(
+                        handler = active.handler,
+                        dog = active.dog,
+                        utn = active.utn,
+                        completedAt = now.toString()
+                    ),
+                    roundResults = SevenUpRoundResults(
+                        finalScore = state.score,
+                        timeRemaining = state.timeRemaining,
+                        jumpSum = jumpSum,
+                        nonJumpSum = nonJumpSum,
+                        jumpCounts = state.jumpCounts,
+                        markedCells = state.markedCells,
+                        sweetSpotBonus = state.sweetSpotBonus,
+                        allRollersEnabled = state.allRollers
+                    ),
+                    roundLog = state.currentRoundLog
+                )
+
+                _pendingJsonExport.value = SevenUpPendingJsonExport(
+                    filename = filename,
+                    content = exportJson.encodeToString(exportData)
+                )
+            }.onFailure { e ->
+                // Log error but don't prevent advancing
+                println("SevenUp JSON export failed: ${e.message}")
+            }
 
             // Persist completed
              _uiState.update { s ->
@@ -529,6 +640,7 @@ class SevenUpScreenModel : ScreenModel {
     /** Reset only the current round state (score/timer/grid marks) for the current active participant. */
     fun resetCurrentRound() {
         resetRoundStateOnly()
+        logEvent("Round reset")
         persistState()
     }
 

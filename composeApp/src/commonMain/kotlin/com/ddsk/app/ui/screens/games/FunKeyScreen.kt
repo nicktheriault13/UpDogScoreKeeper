@@ -93,6 +93,10 @@ object FunKeyScreen : Screen {
         val scope = rememberCoroutineScope()
 
         val audioPlayer = rememberAudioPlayer(remember { getTimerAssetForGame("Fun Key") })
+        val currentAudioTime by audioPlayer.currentTime.collectAsState()
+        val audioRemainingSeconds = remember(audioPlayer.duration, currentAudioTime) {
+            ((audioPlayer.duration - currentAudioTime) / 1000).coerceAtLeast(0)
+        }
         val filePicker = rememberFilePicker { result ->
             when (result) {
                 is ImportResult.Csv, is ImportResult.Xlsx -> {
@@ -143,6 +147,7 @@ object FunKeyScreen : Screen {
                     // Right: Timer card
                     FunKeyTimerCard(
                         timerRunning = isTimerRunning,
+                        timeLeft = audioRemainingSeconds,
                         onStartStop = { isTimerRunning = !isTimerRunning },
                         modifier = Modifier.weight(1f).fillMaxWidth()
                     )
@@ -565,11 +570,16 @@ private fun FunKeyHeaderCard(
 @Composable
 private fun FunKeyTimerCard(
     timerRunning: Boolean,
+    timeLeft: Int,
     onStartStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             // Top row: TIMER and PAUSE buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
@@ -603,36 +613,26 @@ private fun FunKeyTimerCard(
                 }
             }
 
-            // Bottom row: EDIT and RESET buttons
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = { /* Edit */ },
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF00BCD4), // Cyan
-                        contentColor = Color.White
-                    ),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("✎", fontSize = 16.sp)
-                        Text("EDIT", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                    }
-                }
-
-                Button(
-                    onClick = { /* Reset */ },
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF00BCD4), // Cyan
-                        contentColor = Color.White
-                    ),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("↻", fontSize = 16.sp)
-                        Text("RESET", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                    }
+            // Time display - large and prominent
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (timerRunning) "${timeLeft}s" else "Ready",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (timerRunning) Color(0xFF00BCD4) else Color.Gray,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                if (timerRunning) {
+                    Text(
+                        text = "Time Remaining",
+                        fontSize = 14.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
                 }
             }
         }

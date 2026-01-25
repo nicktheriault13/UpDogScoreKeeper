@@ -1,6 +1,8 @@
 package com.ddsk.app.ui.screens.games
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -36,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -84,6 +87,7 @@ object SevenUpScreen : Screen {
         val audioTimerPlaying by screenModel.audioTimerPlaying.collectAsState()
         val audioTimerPosition by screenModel.audioTimerPosition.collectAsState()
         val audioTimerDuration by screenModel.audioTimerDuration.collectAsState()
+        val pendingJsonExport by screenModel.pendingJsonExport.collectAsState()
         val dialogState = remember { mutableStateOf<SevenUpDialogState>(SevenUpDialogState.None) }
         val activeDialog by dialogState
         val scope = rememberCoroutineScope()
@@ -91,6 +95,13 @@ object SevenUpScreen : Screen {
         var showAddParticipant by remember { mutableStateOf(false) }
         var showClearTeamsDialog by remember { mutableStateOf(false) }
         var showResetRoundDialog by remember { mutableStateOf(false) }
+
+        // When model emits a pending JSON export, save it
+        LaunchedEffect(pendingJsonExport) {
+            val pending = pendingJsonExport ?: return@LaunchedEffect
+            saveJsonFileWithPicker(pending.filename, pending.content)
+            screenModel.consumePendingJsonExport()
+        }
 
         val filePicker = rememberFilePicker { result ->
             scope.launch {
@@ -137,6 +148,12 @@ object SevenUpScreen : Screen {
                             onUndo = { screenModel.undo() },
                             onVersionToggle = { screenModel.toggleGridVersion() },
                             onAllRollers = { screenModel.toggleAllRollers() },
+                            onStartStopTimer = {
+                                if (timerRunning) screenModel.stopCountdown() else screenModel.startCountdown()
+                            },
+                            onLongPressStart = { dialogState.value = SevenUpDialogState.ManualTimeEntry },
+                            isTimerRunning = timerRunning,
+                            timeLeft = timeLeft.toDouble(),
                             modifier = Modifier.weight(2f).fillMaxHeight()
                         )
 
@@ -370,6 +387,10 @@ fun SevenUpHeaderCard(
     onUndo: () -> Unit,
     onVersionToggle: () -> Unit,
     onAllRollers: () -> Unit,
+    onStartStopTimer: () -> Unit,
+    onLongPressStart: () -> Unit,
+    isTimerRunning: Boolean,
+    timeLeft: Double,
     modifier: Modifier = Modifier
 ) {
     Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
@@ -467,7 +488,7 @@ fun SevenUpHeaderCard(
                 }
             }
 
-            // Column 3: Score and Sweet Spot indicator
+            // Column 3: Score, START button, Timer, and Sweet Spot indicator
             Column(
                 modifier = Modifier.weight(0.8f),
                 horizontalAlignment = Alignment.End,
@@ -489,22 +510,64 @@ fun SevenUpHeaderCard(
                     }
                 }
 
-                // Sweet Spot Bonus indicator
-                if (uiState.sweetSpotBonusActive) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Start/Stop button
                     Card(
-                        backgroundColor = boomPink,
-                        elevation = 2.dp,
+                        backgroundColor = if (isTimerRunning) Color(0xFFD50000) else Color(0xFF6750A4),
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(38.dp)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onTap = { onStartStopTimer() },
+                                    onLongPress = { onLongPressStart() }
+                                )
+                            }
                     ) {
-                        Text(
-                            "SWEET SPOT!",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            color = Color.White,
-                            modifier = Modifier.padding(8.dp),
-                            textAlign = TextAlign.Center
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(8.dp)
+                        ) {
+                            Text(
+                                if (isTimerRunning) "STOP" else "START",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    // Time Remaining display
+                    Text(
+                        "Time: ${String.format("%.2f", timeLeft)}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+
+                    // Sweet Spot Bonus indicator
+                    if (uiState.sweetSpotBonusActive) {
+                        Card(
+                            backgroundColor = boomPink,
+                            elevation = 2.dp,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "SWEET SPOT!",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = Color.White,
+                                modifier = Modifier.padding(8.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
             }
@@ -663,17 +726,14 @@ fun SevenUpTimerCard(
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top row: START TIMER and PAUSE buttons
+            // Top row: TIMER and PAUSE buttons
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Button(
-                    onClick = onCountdownStart,
-                    enabled = !timerRunning,
+                    onClick = { if (!audioTimerPlaying) onAudioTimerToggle() },
                     modifier = Modifier.weight(1f).height(50.dp),
                     colors = ButtonDefaults.buttonColors(
                         backgroundColor = Color(0xFF00BCD4), // Cyan
-                        contentColor = Color.White,
-                        disabledBackgroundColor = Color(0xFF9E9E9E),
-                        disabledContentColor = Color.White
+                        contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -684,14 +744,11 @@ fun SevenUpTimerCard(
                 }
 
                 Button(
-                    onClick = onCountdownStop,
-                    enabled = timerRunning,
+                    onClick = { if (audioTimerPlaying) onAudioTimerToggle() },
                     modifier = Modifier.weight(1f).height(50.dp),
                     colors = ButtonDefaults.buttonColors(
                         backgroundColor = Color(0xFF00BCD4), // Cyan
-                        contentColor = Color.White,
-                        disabledBackgroundColor = Color(0xFF9E9E9E),
-                        disabledContentColor = Color.White
+                        contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -722,39 +779,6 @@ fun SevenUpTimerCard(
                         color = Color.Gray,
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     )
-                }
-            }
-
-            // Middle row: EDIT and AUDIO TIMER buttons
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = onLongPressStop,
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFF00BCD4), // Cyan
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("✎", fontSize = 16.sp)
-                        Text("EDIT", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                    }
-                }
-
-                Button(
-                    onClick = onAudioTimerToggle,
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = if (audioTimerPlaying) Color(0xFFFF9100) else Color(0xFF00BCD4),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(if (audioTimerPlaying) "⏹" else "▶", fontSize = 16.sp)
-                        Text("AUDIO", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                    }
                 }
             }
         }
@@ -944,12 +968,14 @@ fun getSevenUpLayout(version: Int, flipped: Boolean): List<List<SevenUpCell>> {
         val E = SevenUpCell.NonJump("")
         val SS = SevenUpCell.NonJump("SS", true)
         fun J(n: Int) = SevenUpCell.Jump("J$n", "Jump$n")
+        // Version 0 (V 1) custom labels
+        fun JV1(n: Int, label: String) = SevenUpCell.Jump("J$n", label)
 
         return when (version) {
             0 -> listOf(
-                listOf(E, J(3), E, E, J(7)),
-                listOf(J(1), E, SS, J(5), E),
-                listOf(J(2), J(4), E, J(6), E)
+                listOf(E, JV1(3, "|"), E, E, JV1(7, "--")),
+                listOf(JV1(1, "|"), E, SS, JV1(5, "|"), E),
+                listOf(JV1(2, "|"), JV1(4, "--"), E, JV1(6, "--"), E)
             )
             1 -> listOf(
                 listOf(J(1), E, E, E, J(7)),
@@ -982,7 +1008,7 @@ fun getSevenUpLayout(version: Int, flipped: Boolean): List<List<SevenUpCell>> {
                 listOf(J(1), J(4), E, E, E)
             )
             7 -> listOf(
-                listOf(J(1), E, E, SevenUpCell.Empty, SevenUpCell.Empty),
+                listOf(J(1), E, J(4), SevenUpCell.Empty, SevenUpCell.Empty),
                 listOf(E, J(3), SS, SevenUpCell.Empty, SevenUpCell.Empty),
                 listOf(J(2), E, E, SevenUpCell.Empty, SevenUpCell.Empty)
             )
