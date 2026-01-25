@@ -249,7 +249,7 @@ class FourWayPlayScreenModel : ScreenModel {
         }
         _zoneCatchMap[zoneValue] = (_zoneCatchMap[zoneValue] ?: 0) + 1
 
-        logRoundEvent("Zone $zoneValue pressed (${currentTeamDisplay()}) | ${snapshotStateForLog()}")
+        logRoundEvent("Zone $zoneValue clicked")
     }
 
     private val _zoneCatchMap = mutableMapOf<Int, Int>()
@@ -264,13 +264,13 @@ class FourWayPlayScreenModel : ScreenModel {
         _zoneCatchMap.clear()
         _allRollers.value = false
 
-        logRoundEvent("Reset Scoring (${currentTeamDisplay()}) | ${snapshotStateForLog()}")
+        logRoundEvent("Reset Scoring")
     }
 
     fun moveToNextParticipant() {
         if (_participants.value.isEmpty()) return
 
-        logRoundEvent("Next pressed (${currentTeamDisplay()}) | ${snapshotStateForLog()}")
+        logRoundEvent("Next clicked")
 
         val current = _participants.value.first()
 
@@ -378,7 +378,7 @@ class FourWayPlayScreenModel : ScreenModel {
         _currentParticipantLog.value = emptyList()
 
         recordSidebarAction("Previous participant")
-        logRoundEvent("Previous pressed | now active=${currentTeamDisplay()}")
+        logRoundEvent("Previous clicked")
         persistState()
     }
 
@@ -386,7 +386,7 @@ class FourWayPlayScreenModel : ScreenModel {
         if (_participants.value.size <= 1) return
 
         // React behavior: move current participant to the end (no commit/export)
-        logRoundEvent("Skip pressed (${currentTeamDisplay()})")
+        logRoundEvent("Skip clicked")
         val list = _participants.value
         val first = list.first()
         _participants.value = list.drop(1) + first
@@ -410,7 +410,7 @@ class FourWayPlayScreenModel : ScreenModel {
     fun toggleAllRollers() {
         pushSnapshot()
         _allRollers.value = !_allRollers.value
-        logRoundEvent("All Rollers pressed. State: ${snapshotStateForLog()}")
+        logRoundEvent("All Rollers clicked")
         persistState()
     }
 
@@ -454,7 +454,7 @@ class FourWayPlayScreenModel : ScreenModel {
     fun addMiss() {
         pushSnapshot()
         _misses.value += 1
-        logRoundEvent("Miss pressed (${currentTeamDisplay()}) | ${snapshotStateForLog()}")
+        logRoundEvent("Miss clicked")
     }
 
     /** Compatibility alias for the screen: undo last scoring action. */
@@ -466,7 +466,7 @@ class FourWayPlayScreenModel : ScreenModel {
             _clickedZones.value = snapshot.clickedZones
             _sweetSpotClicked.value = snapshot.sweetSpot
             _misses.value = snapshot.misses
-            logRoundEvent("Undo | ${snapshotStateForLog()}")
+            logRoundEvent("Undo")
         }
     }
 
@@ -476,12 +476,12 @@ class FourWayPlayScreenModel : ScreenModel {
         _sweetSpotClicked.value = !_sweetSpotClicked.value
         // React behavior: sweet spot is worth 2 points.
         if (_sweetSpotClicked.value) _score.value += 2 else _score.value -= 2
-        logRoundEvent("Sweet Spot pressed (${currentTeamDisplay()}) | ${snapshotStateForLog()}")
+        logRoundEvent("Sweet Spot clicked")
     }
 
     /** Compatibility alias for the screen: flip the field orientation. */
     fun flipField() {
         _fieldFlipped.value = !_fieldFlipped.value
-        logRoundEvent("Flip Field pressed | flipped=${_fieldFlipped.value}")
+        logRoundEvent("Flip Field clicked")
     }
 }

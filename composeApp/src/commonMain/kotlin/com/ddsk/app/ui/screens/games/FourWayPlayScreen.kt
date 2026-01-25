@@ -152,7 +152,6 @@ object FourWayPlayScreen : Screen {
                         activeParticipant = participants.firstOrNull(),
                         onUndo = screenModel::undo,
                         onMissClick = screenModel::addMiss,
-                        onOBCatchClick = { /* OB Catch */ },
                         onAllRollersClick = screenModel::toggleAllRollers,
                         allRollers = allRollers,
                         modifier = Modifier.weight(2f).fillMaxHeight()
@@ -465,7 +464,6 @@ private fun HeaderCard(
     activeParticipant: FourWayPlayScreenModel.Participant?,
     onUndo: () -> Unit,
     onMissClick: () -> Unit,
-    onOBCatchClick: () -> Unit,
     onAllRollersClick: () -> Unit,
     allRollers: Boolean,
     modifier: Modifier = Modifier
@@ -528,25 +526,6 @@ private fun HeaderCard(
                     Text("$quads", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
 
-                // OB Catches button
-                Button(
-                    onClick = onOBCatchClick,
-                    colors = ButtonDefaults.buttonColors(
-                        backgroundColor = Color(0xFFFF8A50),
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth().height(30.dp),
-                    shape = RoundedCornerShape(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("OB CATCH", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                        Text("0", fontWeight = FontWeight.Bold, fontSize = 10.sp)
-                    }
-                }
 
                 // Missed Catches button
                 Button(

@@ -498,7 +498,7 @@ private fun SpacedOutHeaderCard(
                         modifier = Modifier.fillMaxWidth().height(38.dp),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("SWEET SPOT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text("SWEET SPOT BONUS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
 
                     // All Rollers button

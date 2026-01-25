@@ -204,7 +204,9 @@ class SpacedOutScreenModel : ScreenModel {
          if (_uiState.value.clickedZones.isEmpty() && _uiState.value.spacedOutCount > 0) {
              appendLog("Spaced Out achieved")
          } else {
-             appendLog("Zone ${zone.label}")
+             // Zone2 is displayed as "Sweet Spot" in the UI
+             val displayLabel = if (zone == SpacedOutZone.Zone2) "Sweet Spot" else "zone${zone.label}"
+             appendLog("$displayLabel clicked (+5 pts)")
          }
 
          persistState()
@@ -222,6 +224,8 @@ class SpacedOutScreenModel : ScreenModel {
                 sweetSpotBonus = !currentState.sweetSpotBonus
             )
         }
+        val isEnabled = _uiState.value.sweetSpotBonus
+        appendLog(if (isEnabled) "Sweet Spot Bonus enabled (+$SWEET_SPOT_BONUS_POINTS pts)" else "Sweet Spot Bonus disabled (-$SWEET_SPOT_BONUS_POINTS pts)")
         persistState()
     }
 
@@ -339,6 +343,7 @@ class SpacedOutScreenModel : ScreenModel {
         if (_timerRunning.value) return
         _timeLeft.value = durationSeconds
         _timerRunning.value = true
+        appendLog("Timer started")
         timerJob?.cancel()
         timerJob = scope.launch {
             while (_timeLeft.value > 0 && _timerRunning.value) {
@@ -354,6 +359,7 @@ class SpacedOutScreenModel : ScreenModel {
         timerJob?.cancel()
         timerJob = null
         _timerRunning.value = false
+        appendLog("Timer stopped")
         persistState()
     }
 
