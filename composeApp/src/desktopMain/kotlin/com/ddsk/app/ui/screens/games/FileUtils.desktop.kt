@@ -593,10 +593,13 @@ actual fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateB
             row.createCell(3).setCellValue(p.utn)
             row.createCell(4).setCellValue(p.jumpSum.toDouble())
             row.createCell(6).setCellValue(p.nonJumpSum.toDouble())
-            row.createCell(8).setCellValue(p.timeRemaining.toDouble())
+            // Column I (8): Time Remaining (rounded to nearest whole number)
+            val timeRounded = kotlin.math.round(p.timeRemaining).toDouble()
+            row.createCell(8).setCellValue(timeRounded)
             row.createCell(10).setCellValue(if (p.sweetSpotBonus) "Y" else "N")
             row.createCell(12).setCellValue(if (p.allRollers) "Y" else "N")
-            row.createCell(15).setCellValue(p.heightDivision)
+            // Column O (14): Height Division
+            row.createCell(14).setCellValue(p.heightDivision)
         }
 
         ByteArrayOutputStream().use { bos ->
@@ -710,3 +713,72 @@ actual fun generateSpacedOutXlsx(participants: List<SpacedOutExportParticipant>,
 private fun itScore(p: SpacedOutExportParticipant): Int {
     return p.zonesCaught * 5 + p.spacedOut * 25 + (if (p.sweetSpot != 0) 5 else 0)
 }
+
+actual fun generateBoomXlsm(participants: List<BoomExportParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 (0-based)
+
+        // Filter out participants with no scoring data
+        val participantsWithData = participants.filter { p ->
+            p.onePointCatches + p.twoPointCatches + p.fivePointCatches + p.tenPointCatches +
+            p.twentyPointCatches + p.twentyFivePointCatches + p.thirtyFivePointCatches > 0 ||
+            p.sweetSpot == "Y" || p.totalScore > 0
+        }
+
+        // If no data to export, return the template as-is
+        if (participantsWithData.isEmpty()) {
+            ByteArrayOutputStream().use { bos ->
+                workbook.write(bos)
+                workbook.close()
+                return bos.toByteArray()
+            }
+        }
+
+        // Sort by total score (highest first), then by tiebreakers
+        val sorted = participantsWithData.sortedWith(
+            compareByDescending<BoomExportParticipant> { it.totalScore }
+                .thenByDescending { it.thirtyFivePointCatches }
+                .thenByDescending { it.twentyFivePointCatches }
+                .thenByDescending { it.twentyPointCatches }
+                .thenByDescending { it.tenPointCatches }
+                .thenByDescending { it.fivePointCatches }
+                .thenByDescending { it.twoPointCatches }
+                .thenByDescending { it.onePointCatches }
+        )
+
+        var outIndex = 0
+        sorted.forEach { p ->
+            val rowNum = startRow + outIndex
+            outIndex++
+
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+            row.createCell(0).setCellValue(1.0)
+            row.createCell(1).setCellValue(p.handler)
+            row.createCell(2).setCellValue(p.dog)
+            row.createCell(3).setCellValue(p.utn)
+            // Use integer values directly - Apache POI will format as whole numbers
+            row.createCell(4).setCellValue(p.onePointCatches.toDouble())
+            row.createCell(5).setCellValue(p.twoPointCatches.toDouble())
+            row.createCell(6).setCellValue(p.fivePointCatches.toDouble())
+            row.createCell(7).setCellValue(p.tenPointCatches.toDouble())
+            row.createCell(8).setCellValue(p.twentyPointCatches.toDouble())
+            row.createCell(9).setCellValue(p.twentyFivePointCatches.toDouble())
+            row.createCell(10).setCellValue(p.thirtyFivePointCatches.toDouble())
+            row.createCell(12).setCellValue(p.sweetSpot)
+            // Column P (15): Height Division
+            row.createCell(15).setCellValue(p.heightDivision)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+

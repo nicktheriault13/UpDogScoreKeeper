@@ -45,6 +45,23 @@ data class FunKeyExportParticipant(
     val allRollers: String // "Y" or "N"
 )
 
+@kotlinx.serialization.Serializable
+data class BoomExportParticipant(
+    val handler: String,
+    val dog: String,
+    val utn: String,
+    val onePointCatches: Int,
+    val twoPointCatches: Int, // Sum of 2a and 2b
+    val fivePointCatches: Int,
+    val tenPointCatches: Int,
+    val twentyPointCatches: Int,
+    val twentyFivePointCatches: Int,
+    val thirtyFivePointCatches: Int,
+    val sweetSpot: String, // "Y" or "N"
+    val totalScore: Int,
+    val heightDivision: String
+)
+
 // Remove duplicate SevenUpParticipant data class (defined in SevenUpScreenModel).
 // SevenUp XLSM export uses the SevenUpParticipant type from SevenUpScreenModel.
 
@@ -97,6 +114,8 @@ expect fun generateFunKeyXlsm(participants: List<FunKeyExportParticipant>, templ
 expect fun generateFrizgilityXlsx(participants: List<FrizgilityParticipantWithResults>, templateBytes: ByteArray): ByteArray
 // Spaced Out XLSX export
 expect fun generateSpacedOutXlsx(participants: List<SpacedOutExportParticipant>, templateBytes: ByteArray): ByteArray
+// Boom XLSM export
+expect fun generateBoomXlsm(participants: List<BoomExportParticipant>, templateBytes: ByteArray): ByteArray
 
 // From GameImporter.kt
 expect fun parseXlsxRows(bytes: ByteArray): List<List<String>>

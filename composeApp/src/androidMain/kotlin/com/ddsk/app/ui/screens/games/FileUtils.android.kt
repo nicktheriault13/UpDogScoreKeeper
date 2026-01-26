@@ -689,14 +689,15 @@ actual fun generateSevenUpXlsm(participants: List<SevenUpParticipant>, templateB
             row.createCell(4).setCellValue(p.jumpSum.toDouble())
             // Column G (6): Non-Jump Sum
             row.createCell(6).setCellValue(p.nonJumpSum.toDouble())
-            // Column I (8): Time Remaining (0.00)
-            row.createCell(8).setCellValue(p.timeRemaining.toDouble())
+            // Column I (8): Time Remaining (rounded to nearest whole number)
+            val timeRounded = kotlin.math.round(p.timeRemaining).toDouble()
+            row.createCell(8).setCellValue(timeRounded)
             // Column K (10): Sweet Spot (Y/N)
             row.createCell(10).setCellValue(if (p.sweetSpotBonus) "Y" else "N")
             // Column M (12): All Rollers (Y/N)
             row.createCell(12).setCellValue(if (p.allRollers) "Y" else "N")
-            // Column P (15): Height Division
-            row.createCell(15).setCellValue(p.heightDivision)
+            // Column O (14): Height Division
+            row.createCell(14).setCellValue(p.heightDivision)
         }
 
         ByteArrayOutputStream().use { bos ->
@@ -847,3 +848,83 @@ actual fun rememberAssetLoader(): AssetLoader {
         }
     }
 }
+
+actual fun generateBoomXlsm(participants: List<BoomExportParticipant>, templateBytes: ByteArray): ByteArray {
+    return try {
+        val workbook = WorkbookFactory.create(ByteArrayInputStream(templateBytes))
+        val worksheet = workbook.getSheet("Data Entry Sheet") ?: workbook.getSheetAt(0)
+        val startRow = 3 // Row 4 (0-based)
+
+        // Filter out participants with no scoring data
+        val participantsWithData = participants.filter { p ->
+            p.onePointCatches + p.twoPointCatches + p.fivePointCatches + p.tenPointCatches +
+            p.twentyPointCatches + p.twentyFivePointCatches + p.thirtyFivePointCatches > 0 ||
+            p.sweetSpot == "Y" || p.totalScore > 0
+        }
+
+        // If no data to export, return the template as-is
+        if (participantsWithData.isEmpty()) {
+            val bos = ByteArrayOutputStream()
+            workbook.write(bos)
+            workbook.close()
+            return bos.toByteArray()
+        }
+
+        // Sort by total score (highest first), then by tiebreakers
+        val sorted = participantsWithData.sortedWith(
+            compareByDescending<BoomExportParticipant> { it.totalScore }
+                .thenByDescending { it.thirtyFivePointCatches }
+                .thenByDescending { it.twentyFivePointCatches }
+                .thenByDescending { it.twentyPointCatches }
+                .thenByDescending { it.tenPointCatches }
+                .thenByDescending { it.fivePointCatches }
+                .thenByDescending { it.twoPointCatches }
+                .thenByDescending { it.onePointCatches }
+        )
+
+        var outIndex = 0
+        sorted.forEach { p ->
+            val rowNum = startRow + outIndex
+            outIndex++
+
+            val row = worksheet.getRow(rowNum) ?: worksheet.createRow(rowNum)
+
+            // Column A (0): Level
+            row.createCell(0).setCellValue(1.0)
+            // Column B (1): Handler
+            row.createCell(1).setCellValue(p.handler)
+            // Column C (2): Dog
+            row.createCell(2).setCellValue(p.dog)
+            // Column D (3): UTN
+            row.createCell(3).setCellValue(p.utn)
+            // Column E (4): 1 point catches - use integer value
+            row.createCell(4).setCellValue(p.onePointCatches.toDouble())
+            // Column F (5): 2 point catches - use integer value
+            row.createCell(5).setCellValue(p.twoPointCatches.toDouble())
+            // Column G (6): 5 point catches - use integer value
+            row.createCell(6).setCellValue(p.fivePointCatches.toDouble())
+            // Column H (7): 10 point catches - use integer value
+            row.createCell(7).setCellValue(p.tenPointCatches.toDouble())
+            // Column I (8): 20 point catches - use integer value
+            row.createCell(8).setCellValue(p.twentyPointCatches.toDouble())
+            // Column J (9): 25 point catches - use integer value
+            row.createCell(9).setCellValue(p.twentyFivePointCatches.toDouble())
+            // Column K (10): 35 point catches - use integer value
+            row.createCell(10).setCellValue(p.thirtyFivePointCatches.toDouble())
+            // Column M (12): Sweet Spot (Y/N)
+            row.createCell(12).setCellValue(p.sweetSpot)
+            // Column P (15): Height Division
+            row.createCell(15).setCellValue(p.heightDivision)
+        }
+
+        ByteArrayOutputStream().use { bos ->
+            workbook.write(bos)
+            workbook.close()
+            bos.toByteArray()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        ByteArray(0)
+    }
+}
+

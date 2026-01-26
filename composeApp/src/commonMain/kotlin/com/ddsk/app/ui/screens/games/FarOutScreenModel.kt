@@ -99,6 +99,34 @@ private const val DEFAULT_TIMER_MILLIS = 90_000L
 private const val MAX_UNDO_LEVELS = 250
 private val json = Json { prettyPrint = true }
 
+// Serializable data classes for JSON export
+@Serializable
+data class FarOutJsonExportData(
+    val gameMode: String,
+    val exportTimestamp: String,
+    val participant: FarOutParticipantDataJson,
+    val roundResults: FarOutRoundResultsJson
+)
+
+@Serializable
+data class FarOutParticipantDataJson(
+    val Handler: String,
+    val Dog: String,
+    val UTN: String
+)
+
+@Serializable
+data class FarOutRoundResultsJson(
+    val throw1: String,
+    val throw2: String,
+    val throw3: String,
+    val sweetShot: String,
+    val allRollers: Boolean,
+    val score: Double,
+    val misses: Int,
+    val sweetShotDeclined: Boolean
+)
+
 class FarOutScreenModel(
     private val logger: FarOutLogger = ConsoleFarOutLogger()
 ) : ScreenModel {
@@ -114,6 +142,20 @@ class FarOutScreenModel(
     val state: StateFlow<FarOutState> = _state.asStateFlow()
 
     private val undoStack = ArrayDeque<FarOutUndoSnapshot>()
+
+    // JSON export state (for Android sharing)
+    @Serializable
+    data class PendingJsonExport(
+        val filename: String,
+        val content: String
+    )
+
+    private val _pendingJsonExport = MutableStateFlow<PendingJsonExport?>(null)
+    val pendingJsonExport: StateFlow<PendingJsonExport?> = _pendingJsonExport.asStateFlow()
+
+    fun consumePendingJsonExport() {
+        _pendingJsonExport.value = null
+    }
 
     private var timerJob: Job? = null
     private var timerSoundJob: Job? = null
@@ -215,9 +257,11 @@ class FarOutScreenModel(
         val participant = FarOutParticipant(handler, dog, utn)
         pushUndo()
         _state.update { current ->
+            // FourWayPlay-style queue semantics: index 0 is always the active team.
             val updated = current.participants + participant
             current.copy(
                 participants = updated,
+                activeIndex = 0,
                 participantCountWithoutScores = updated.count { !hasScoringData(it) }
             )
         }
@@ -254,45 +298,57 @@ class FarOutScreenModel(
                 _state.value.missStates.sweetShotMiss
             ).count { it }
         )
+
+        // FourWayPlay-style queue rotation: move active to end, next becomes index 0.
         val filtered = _state.value.participants.filterIndexed { index, _ -> index != _state.value.activeIndex }
-        val nextIndex = 0
+        val rotated = filtered + updatedActive
+
         pushUndo()
         _state.update { current ->
-            val updatedList = filtered + updatedActive
             current.copy(
-                participants = updatedList,
-                activeIndex = minOf(nextIndex, updatedList.lastIndex),
+                participants = rotated,
+                activeIndex = 0,
                 throwInputs = ThrowInputs("", "", "", ""),
                 missStates = MissStates(false, false, false, false),
                 sweetShotDeclined = false,
                 allRollersPressed = false,
                 score = 0.0,
-                participantCountWithoutScores = updatedList.count { !hasScoringData(it) }
+                participantCountWithoutScores = rotated.count { !hasScoringData(it) }
             )
         }
         logEvent("Completed ${active.handler} & ${active.dog}")
         persistParticipants()
+
+        // Auto-export JSON for this participant (emit via state flow for Android sharing)
         if (autoExport) {
-            scope.launch { autoExportParticipant(updatedActive) }
+            exportParticipantJson(updatedActive)
         }
     }
 
     fun skipParticipant() {
-        if (_state.value.participants.isEmpty()) return
+        val participants = _state.value.participants
+        if (participants.isEmpty()) return
         pushUndo()
         _state.update { current ->
-            val newIndex = (current.activeIndex + 1) % current.participants.size
-            current.copy(activeIndex = newIndex)
+            // FourWayPlay-style skip: move active to end, next becomes active.
+            val active = current.participants.getOrNull(current.activeIndex)
+            val remaining = current.participants.filterIndexed { idx, _ -> idx != current.activeIndex }
+            val rotated = if (active != null) remaining + active else remaining
+            current.copy(participants = rotated, activeIndex = 0)
         }
         logEvent("Participant skipped")
     }
 
     fun previousParticipant() {
-        if (_state.value.participants.isEmpty()) return
+        val participants = _state.value.participants
+        if (participants.isEmpty()) return
         pushUndo()
         _state.update { current ->
-            val newIndex = if (current.activeIndex == 0) current.participants.lastIndex else current.activeIndex - 1
-            current.copy(activeIndex = newIndex)
+            // FourWayPlay-style previous: take last and move it to front.
+            if (current.participants.size <= 1) return@update current.copy(activeIndex = 0)
+            val last = current.participants.last()
+            val rest = current.participants.dropLast(1)
+            current.copy(participants = listOf(last) + rest, activeIndex = 0)
         }
         logEvent("Moved to previous participant")
     }
@@ -303,70 +359,82 @@ class FarOutScreenModel(
     }
 
     fun importParticipantsFromCsv(csvText: String, mode: ImportMode = ImportMode.ReplaceAll) {
-        val imported = parseCsv(csvText)
-        val participants = imported.map {
-            FarOutParticipant(
-                handler = it.handler,
-                dog = it.dog,
-                utn = it.utn,
-                jumpHeight = it.jumpHeight,
-                heightDivision = it.heightDivision,
-                clubDivision = it.clubDivision
-            )
+        // Keep using the shared CSV parser (same as FourWayPlay), but do it synchronously
+        // and without custom per-screen CSV parsing helpers.
+        try {
+            val imported = parseCsv(csvText)
+            val participants = imported.map {
+                FarOutParticipant(
+                    handler = it.handler,
+                    dog = it.dog,
+                    utn = it.utn,
+                    jumpHeight = it.jumpHeight,
+                    heightDivision = it.heightDivision,
+                    clubDivision = it.clubDivision
+                )
+            }
+            applyImportedParticipants(participants, mode)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            logEvent("Import CSV failed: ${e.message}")
         }
-        applyImportedParticipants(participants, mode)
     }
 
     fun importParticipantsFromXlsx(xlsxData: ByteArray, mode: ImportMode = ImportMode.ReplaceAll) {
-        val imported = parseXlsx(xlsxData)
-        val participants = imported.map {
-            FarOutParticipant(
-                handler = it.handler,
-                dog = it.dog,
-                utn = it.utn,
-                jumpHeight = it.jumpHeight,
-                heightDivision = it.heightDivision,
-                clubDivision = it.clubDivision
-            )
+        // Match FourWayPlay: parseXlsx + map + set state.
+        try {
+            val imported = parseXlsx(xlsxData)
+            val participants = imported.map {
+                FarOutParticipant(
+                    handler = it.handler,
+                    dog = it.dog,
+                    utn = it.utn,
+                    jumpHeight = it.jumpHeight,
+                    heightDivision = it.heightDivision,
+                    clubDivision = it.clubDivision
+                )
+            }
+            applyImportedParticipants(participants, mode)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            logEvent("Import XLSX failed: ${e.message}")
         }
-        applyImportedParticipants(participants, mode)
     }
 
     private fun applyImportedParticipants(newParticipants: List<FarOutParticipant>, mode: ImportMode) {
-        if (newParticipants.isEmpty()) return
+        if (newParticipants.isEmpty()) {
+            logEvent("Import: 0 participants (check sheet + headers)")
+            persistParticipants()
+            return
+        }
 
-        _state.update { currentState ->
-            val updatedParticipants = when (mode) {
-                ImportMode.Add -> {
-                    logEvent("Added ${newParticipants.size} participants to existing ${currentState.participants.size}")
-                    currentState.participants + newParticipants
-                }
-                ImportMode.ReplaceAll -> {
-                    logEvent("Replaced all participants with ${newParticipants.size} new participants")
-                    newParticipants
-                }
+        pushUndo()
+        _state.update { s ->
+            val merged = when (mode) {
+                ImportMode.ReplaceAll -> newParticipants
+                ImportMode.Add -> s.participants + newParticipants
             }
-
-            currentState.copy(
-                participants = updatedParticipants,
-                activeIndex = if (mode == ImportMode.ReplaceAll) 0 else currentState.activeIndex
+            // FourWayPlay-style queue: active is always index 0.
+            s.copy(
+                participants = merged,
+                activeIndex = 0,
+                throwInputs = ThrowInputs("", "", "", ""),
+                missStates = MissStates(false, false, false, false),
+                sweetShotDeclined = false,
+                allRollersPressed = false,
+                score = 0.0,
+                participantCountWithoutScores = merged.count { !hasScoringData(it) }
             )
         }
-    }
 
-    @Deprecated("Use applyImportedParticipants instead")
-    private fun setParticipants(participants: List<FarOutParticipant>) {
-        if (participants.isEmpty()) return
-        logEvent("Imported ${participants.size} participants")
-        _state.update {
-            it.copy(
-                participants = participants,
-                activeIndex = 0
-            )
-        }
+        logEvent(
+            when (mode) {
+                ImportMode.ReplaceAll -> "Imported ${newParticipants.size} from ${if (newParticipants.size == 1) "team" else "teams"} (replace)"
+                ImportMode.Add -> "Imported ${newParticipants.size} from ${if (newParticipants.size == 1) "team" else "teams"} (add)"
+            }
+        )
+        persistParticipants()
     }
-
-    private fun List<String>.valueAt(index: Int?): String = index?.let { getOrNull(it) }?.trim().orEmpty()
 
     fun exportParticipantsAsCsv(): String {
         val header = "Handler,Dog,UTN,Jump Height,Height Division,Club Division,Throw1,Throw2,Throw3,SweetShot,SweetDeclined,AllRollers,Score,Misses"
@@ -538,9 +606,12 @@ class FarOutScreenModel(
                 }
                 if (missFlag) 0.0 else value.toDoubleOrNull() ?: 0.0
             }
-        val sweetShotValue = if (miss.sweetShotMiss || declined) 0.0 else throws.sweetShot.toDoubleOrNull() ?: 0.0
+        val sweetShotValue = if (miss.sweetShotMiss) 0.0 else throws.sweetShot.toDoubleOrNull() ?: 0.0
         val sorted = throwValues.sortedDescending()
-        return if (sweetShotValue > 0) {
+
+        // If sweet shot is NOT declined, score = highest 2 throws + sweet shot (0 if miss)
+        // If sweet shot IS declined, score = sum of all 3 throws
+        return if (!declined) {
             sweetShotValue + sorted.take(2).sum()
         } else {
             throwValues.sum()
@@ -587,16 +658,44 @@ class FarOutScreenModel(
         isPaused = isPaused
     )
 
-    private fun parseCsvRows(csv: String): List<List<String>> = csv.lines()
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-        .map { line ->
-            line.split(',').map { it.trim() }
-        }
+    private fun exportParticipantJson(participant: FarOutParticipant) {
+        try {
+            val now = Clock.System.now()
+            val timestamp = now.toString().replace(":", "-").substringBefore(".")
+            val handlerPart = participant.handler.replace(" ", "_").ifBlank { "Unknown" }
+            val dogPart = participant.dog.replace(" ", "_").ifBlank { "Unknown" }
+            val fileName = "FarOut_${handlerPart}_${dogPart}_${timestamp}.json"
 
-    private suspend fun autoExportParticipant(participant: FarOutParticipant) {
-        val payload = json.encodeToString(participant)
-        // storage.shareParticipantJson(participant.handler, participant.dog, payload)
+            val exportData = FarOutJsonExportData(
+                gameMode = "FarOut",
+                exportTimestamp = now.toString(),
+                participant = FarOutParticipantDataJson(
+                    Handler = participant.handler,
+                    Dog = participant.dog,
+                    UTN = participant.utn
+                ),
+                roundResults = FarOutRoundResultsJson(
+                    throw1 = participant.throw1,
+                    throw2 = participant.throw2,
+                    throw3 = participant.throw3,
+                    sweetShot = participant.sweetShot,
+                    allRollers = participant.allRollers,
+                    score = participant.score,
+                    misses = participant.misses,
+                    sweetShotDeclined = participant.sweetShotDeclined
+                )
+            )
+
+            val jsonString = json.encodeToString(exportData)
+
+            // Emit via state flow for cross-platform handling (share on Android, save on Desktop)
+            _pendingJsonExport.value = PendingJsonExport(fileName, jsonString)
+
+            logEvent("JSON Export: $fileName created for ${participant.handler} & ${participant.dog}")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            logEvent("JSON Export Error: Failed to export data for ${participant.handler} & ${participant.dog}")
+        }
     }
 
     fun dispose() {

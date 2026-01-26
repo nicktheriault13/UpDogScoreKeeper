@@ -82,7 +82,14 @@ object FarOutScreen : Screen {
         }
         val state by screenModel.state.collectAsState()
         val activeParticipant = state.participants.getOrNull(state.activeIndex)
-        val remainingTeams = state.participants.filterNot { it.hasScoringData() }
+        // Queue shows only teams without score data (not yet completed)
+        val queueParticipants = state.participants.filter { participant ->
+            participant.throw1.isBlank() &&
+            participant.throw2.isBlank() &&
+            participant.throw3.isBlank() &&
+            participant.sweetShot.isBlank() &&
+            participant.score == 0.0
+        }
 
         var textPreview by remember { mutableStateOf<TextPreview?>(null) }
         var showLogDialog by remember { mutableStateOf(false) }
@@ -125,6 +132,14 @@ object FarOutScreen : Screen {
                 timerDisplay.isPaused -> audioPlayer.pause()
                 else -> audioPlayer.play()
             }
+        }
+
+        // Handle JSON export via saveJsonFileWithPicker (shares on Android, saves on Desktop)
+        val pendingJsonExport by screenModel.pendingJsonExport.collectAsState()
+        LaunchedEffect(pendingJsonExport) {
+            val pending = pendingJsonExport ?: return@LaunchedEffect
+            saveJsonFileWithPicker(pending.filename, pending.content)
+            screenModel.consumePendingJsonExport()
         }
 
         Surface(modifier = Modifier.fillMaxSize().background(Color(0xFFFFFBFE))) {
@@ -198,7 +213,7 @@ object FarOutScreen : Screen {
                         ) {
                             // Queue card showing teams
                             FarOutQueueCard(
-                                remainingTeams = remainingTeams,
+                                remainingTeams = queueParticipants,
                                 activeParticipant = activeParticipant,
                                 modifier = Modifier.weight(1f)
                             )
@@ -414,12 +429,10 @@ object FarOutScreen : Screen {
                     TextButton(
                         onClick = {
                             val import = pendingImportResult
-                            scope.launch {
-                                if (import is ImportResult.Csv) {
-                                    screenModel.importParticipantsFromCsv(import.contents, FarOutScreenModel.ImportMode.Add)
-                                } else if (import is ImportResult.Xlsx) {
-                                    screenModel.importParticipantsFromXlsx(import.bytes, FarOutScreenModel.ImportMode.Add)
-                                }
+                            if (import is ImportResult.Csv) {
+                                screenModel.importParticipantsFromCsv(import.contents, FarOutScreenModel.ImportMode.Add)
+                            } else if (import is ImportResult.Xlsx) {
+                                screenModel.importParticipantsFromXlsx(import.bytes, FarOutScreenModel.ImportMode.Add)
                             }
                             showImportModeDialog = false
                             pendingImportResult = null
@@ -431,12 +444,10 @@ object FarOutScreen : Screen {
                         TextButton(
                             onClick = {
                                 val import = pendingImportResult
-                                scope.launch {
-                                    if (import is ImportResult.Csv) {
-                                        screenModel.importParticipantsFromCsv(import.contents, FarOutScreenModel.ImportMode.ReplaceAll)
-                                    } else if (import is ImportResult.Xlsx) {
-                                        screenModel.importParticipantsFromXlsx(import.bytes, FarOutScreenModel.ImportMode.ReplaceAll)
-                                    }
+                                if (import is ImportResult.Csv) {
+                                    screenModel.importParticipantsFromCsv(import.contents, FarOutScreenModel.ImportMode.ReplaceAll)
+                                } else if (import is ImportResult.Xlsx) {
+                                    screenModel.importParticipantsFromXlsx(import.bytes, FarOutScreenModel.ImportMode.ReplaceAll)
                                 }
                                 showImportModeDialog = false
                                 pendingImportResult = null

@@ -53,11 +53,6 @@ import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
 
-// Helper for loading template
-fun fetchTemplateBytes(@Suppress("UNUSED_PARAMETER") name: String): ByteArray {
-    // Stub implementation - in real app use resource loader
-    return ByteArray(0)
-}
 
 sealed class SevenUpDialogState {
     object None : SevenUpDialogState()
@@ -92,9 +87,16 @@ object SevenUpScreen : Screen {
         val activeDialog by dialogState
         val scope = rememberCoroutineScope()
 
+        val assetLoader = rememberAssetLoader()
+        val fileExporter = rememberFileExporter()
+
         var showAddParticipant by remember { mutableStateOf(false) }
         var showClearTeamsDialog by remember { mutableStateOf(false) }
         var showResetRoundDialog by remember { mutableStateOf(false) }
+        var showImportModeDialog by remember { mutableStateOf(false) }
+        var pendingImportResult by remember { mutableStateOf<ImportResult?>(null) }
+        var showExportDialog by remember { mutableStateOf(false) }
+        var exportMessage by remember { mutableStateOf("") }
 
         // When model emits a pending JSON export, save it
         LaunchedEffect(pendingJsonExport) {
@@ -104,12 +106,12 @@ object SevenUpScreen : Screen {
         }
 
         val filePicker = rememberFilePicker { result ->
-            scope.launch {
-                when (result) {
-                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(result.contents, SevenUpScreenModel.ImportMode.Add)
-                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(result.bytes, SevenUpScreenModel.ImportMode.Add)
-                    else -> {}
+            when (result) {
+                is ImportResult.Csv, is ImportResult.Xlsx -> {
+                    pendingImportResult = result
+                    showImportModeDialog = true
                 }
+                else -> {}
             }
         }
 
@@ -203,8 +205,21 @@ object SevenUpScreen : Screen {
                                 onAddTeam = { showAddParticipant = true },
                                 onExport = {
                                     scope.launch {
-                                        val template = fetchTemplateBytes("sevenup")
-                                        screenModel.exportData(template)
+                                        val template = assetLoader.load("templates/UDC SevenUP Data Entry L1 Div Sort.xlsm")
+                                        if (template == null) {
+                                            exportMessage = "Template missing"
+                                            showExportDialog = true
+                                            return@launch
+                                        }
+                                        val result = screenModel.exportData(template)
+                                        if (result == null) {
+                                            exportMessage = "No scored teams to export or export failed"
+                                            showExportDialog = true
+                                        } else {
+                                            fileExporter.save(result.fileName, result.data)
+                                            exportMessage = "Export successful: ${result.fileName}"
+                                            showExportDialog = true
+                                        }
                                     }
                                 },
                                 onLog = { screenModel.exportLog() },
@@ -373,6 +388,70 @@ object SevenUpScreen : Screen {
                 dismissButton = {
                     TextButton(onClick = { showResetRoundDialog = false }) {
                         Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showImportModeDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    showImportModeDialog = false
+                    pendingImportResult = null
+                },
+                title = { Text("Import participants") },
+                text = { Text("Would you like to add these participants to the current list, or replace everything?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val import = pendingImportResult
+                            scope.launch {
+                                when (import) {
+                                    is ImportResult.Csv -> screenModel.importParticipantsFromCsv(import.contents, SevenUpScreenModel.ImportMode.Add)
+                                    is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(import.bytes, SevenUpScreenModel.ImportMode.Add)
+                                    else -> {}
+                                }
+                            }
+                            showImportModeDialog = false
+                            pendingImportResult = null
+                        }
+                    ) { Text("Add") }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(
+                            onClick = {
+                                val import = pendingImportResult
+                                scope.launch {
+                                    when (import) {
+                                        is ImportResult.Csv -> screenModel.importParticipantsFromCsv(import.contents, SevenUpScreenModel.ImportMode.ReplaceAll)
+                                        is ImportResult.Xlsx -> screenModel.importParticipantsFromXlsx(import.bytes, SevenUpScreenModel.ImportMode.ReplaceAll)
+                                        else -> {}
+                                    }
+                                }
+                                showImportModeDialog = false
+                                pendingImportResult = null
+                            }
+                        ) { Text("Replace") }
+                        TextButton(
+                            onClick = {
+                                showImportModeDialog = false
+                                pendingImportResult = null
+                            }
+                        ) { Text("Cancel") }
+                    }
+                }
+            )
+        }
+
+        if (showExportDialog) {
+            AlertDialog(
+                onDismissRequest = { showExportDialog = false },
+                title = { Text("Export") },
+                text = { Text(exportMessage) },
+                confirmButton = {
+                    Button(onClick = { showExportDialog = false }) {
+                        Text("OK")
                     }
                 }
             )

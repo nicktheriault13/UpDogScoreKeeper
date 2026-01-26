@@ -274,9 +274,66 @@ class SevenUpScreenModel : ScreenModel {
 
     fun toggleAllRollersFlag() = toggleAllRollers()
 
-    fun exportData(templateBytes: ByteArray) {
-        // Placeholder
+    data class SevenUpExportResult(
+        val fileName: String,
+        val data: ByteArray
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is SevenUpExportResult) return false
+            if (fileName != other.fileName) return false
+            if (!data.contentEquals(other.data)) return false
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = fileName.hashCode()
+            result = 31 * result + data.contentHashCode()
+            return result
+        }
+    }
+
+    fun exportData(templateBytes: ByteArray?): SevenUpExportResult? {
         logEvent("Export Data")
+
+        if (templateBytes == null || templateBytes.isEmpty()) {
+            return null
+        }
+
+        val state = _uiState.value
+
+        // Collect all participants with scoring data (completed)
+        val allParticipants = (listOfNotNull(state.activeParticipant) + state.queue + state.completed)
+
+        // Filter to only those with scoring data
+        val scored = allParticipants.filter { p ->
+            p.jumpSum != 0 || p.nonJumpSum != 0 || p.timeRemaining.toInt() != 60 || p.sweetSpotBonus || p.allRollers
+        }
+
+        if (scored.isEmpty()) {
+            return null
+        }
+
+        val bytes = generateSevenUpXlsm(scored, templateBytes)
+        if (bytes.isEmpty()) {
+            return null
+        }
+
+        // Generate filename with timestamp
+        val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+        fun pad2(n: Int) = n.toString().padStart(2, '0')
+        val stamp = buildString {
+            append(now.year)
+            append(pad2(now.monthNumber))
+            append(pad2(now.dayOfMonth))
+            append('_')
+            append(pad2(now.hour))
+            append(pad2(now.minute))
+            append(pad2(now.second))
+        }
+        val filename = "SevenUp_Scores_$stamp.xlsm"
+
+        return SevenUpExportResult(filename, bytes)
     }
 
     fun exportLog() {

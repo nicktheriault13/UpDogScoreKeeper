@@ -58,6 +58,7 @@ data class BoomParticipant(
     val handler: String,
     val dog: String,
     val utn: String,
+    val heightDivision: String = "",
     val stats: BoomParticipantStats = BoomParticipantStats()
 )
 
@@ -119,6 +120,15 @@ class BoomScreenModel : ScreenModel {
 
     private val _uiState = MutableStateFlow(BoomUiState())
     val uiState = _uiState.asStateFlow()
+
+    // Per-participant action log (like Greedy)
+    private val _currentParticipantLog = MutableStateFlow<List<String>>(emptyList())
+    val currentParticipantLog = _currentParticipantLog.asStateFlow()
+
+    private fun logEvent(message: String) {
+        val entry = "${kotlinx.datetime.Clock.System.now()}: $message"
+        _currentParticipantLog.value = _currentParticipantLog.value + entry
+    }
 
     private var dataStore: DataStore? = null
     private val persistenceKey = "BoomData.json"
@@ -195,12 +205,15 @@ class BoomScreenModel : ScreenModel {
     }
 
     fun toggleAllRollers() {
-        _uiState.update { it.copy(allRollersActive = !it.allRollersActive) }
+        val newState = !_uiState.value.allRollersActive
+        logEvent("All Rollers ${if (newState) "enabled" else "disabled"}")
+        _uiState.update { it.copy(allRollersActive = newState) }
         persistState()
     }
 
     fun handleScoringButtonClick(button: BoomScoringButton) {
         pushUndo()
+        logEvent("Button pressed: ${button.label}")
         _uiState.update { state ->
             if (button.id in state.buttonState.clickedButtons || button.id !in state.buttonState.enabledButtons) {
                 return@update state
@@ -222,6 +235,7 @@ class BoomScreenModel : ScreenModel {
 
     fun handleBoom() {
         pushUndo()
+        logEvent("Boom! button pressed")
         _uiState.update { state ->
             if (state.buttonState.clickedButtons.isEmpty()) return@update state
             val throwPoints = state.buttonState.clickedButtons.sumOf { BoomScoringButton.fromId(it)?.points ?: 0 }
@@ -246,6 +260,7 @@ class BoomScreenModel : ScreenModel {
 
     fun handleDud() {
         pushUndo()
+        logEvent("Dud button pressed")
         _uiState.update { state ->
             val fiveClicked = state.buttonState.clickedButtons.contains(BoomScoringButton.Five.id)
             val dudScore = if (fiveClicked) 10 else 0
@@ -273,6 +288,7 @@ class BoomScreenModel : ScreenModel {
         pushUndo()
         _uiState.update { state ->
             val newSweetSpotActive = !state.sweetSpotActive
+            logEvent("Sweet Spot ${if (newSweetSpotActive) "activated" else "deactivated"}")
             val scoreChange = if (newSweetSpotActive) 10 else -10
             val sweetSpotChange = if (newSweetSpotActive) 1 else -1
 
@@ -295,6 +311,8 @@ class BoomScreenModel : ScreenModel {
                 sweetSpotActive = false
             )
         }
+        // Clear the participant log for the next participant
+        _currentParticipantLog.value = emptyList()
         persistState()
     }
 
@@ -386,13 +404,13 @@ class BoomScreenModel : ScreenModel {
 
     fun importParticipantsFromCsv(csvText: String, addToExisting: Boolean = false) {
         val imported = parseCsv(csvText)
-        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn) }
+        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn, it.heightDivision) }
         applyImportedPlayers(players, addToExisting)
     }
 
     fun importParticipantsFromXlsx(xlsxData: ByteArray, addToExisting: Boolean = false) {
         val imported = parseXlsx(xlsxData)
-        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn) }
+        val players = imported.map { BoomParticipant(it.handler, it.dog, it.utn, it.heightDivision) }
         applyImportedPlayers(players, addToExisting)
     }
 
@@ -483,8 +501,8 @@ class BoomScreenModel : ScreenModel {
         persistState()
     }
 
-    fun addParticipant(handler: String, dog: String, utn: String) {
-        val newParticipant = BoomParticipant(handler, dog, utn)
+    fun addParticipant(handler: String, dog: String, utn: String, heightDivision: String = "") {
+        val newParticipant = BoomParticipant(handler, dog, utn, heightDivision)
         _uiState.update { state ->
             if (state.activeParticipant == null) {
                 state.copy(activeParticipant = newParticipant)
@@ -576,9 +594,11 @@ class BoomScreenModel : ScreenModel {
                     put("totalScore", kotlinx.serialization.json.JsonPrimitive(stats.totalScore))
                 }
 
-                // Empty round log array (matching React structure but not implementing full log tracking yet)
+                // Round log with all button press actions
                 putJsonArray("roundLog") {
-                    // Could be populated with log entries if needed
+                    _currentParticipantLog.value.forEach { logEntry ->
+                        add(JsonPrimitive(logEntry))
+                    }
                 }
             }
         )

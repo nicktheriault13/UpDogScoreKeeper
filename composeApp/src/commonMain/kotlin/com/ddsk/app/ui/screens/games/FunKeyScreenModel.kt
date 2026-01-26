@@ -117,6 +117,15 @@ class FunKeyScreenModel : ScreenModel {
     val participantQueue = _uiState.map { it.queue }.stateIn(scope, SharingStarted.Eagerly, emptyList())
     val completedParticipants = _uiState.map { it.completed }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
+    // Per-participant action log (like Greedy/Boom)
+    private val _currentParticipantLog = MutableStateFlow<List<String>>(emptyList())
+    val currentParticipantLog = _currentParticipantLog.asStateFlow()
+
+    private fun logEvent(message: String) {
+        val entry = "${Clock.System.now()}: $message"
+        _currentParticipantLog.value = _currentParticipantLog.value + entry
+    }
+
     // ---- JSON export (triggered on Next Team) ----
 
     @Serializable
@@ -130,7 +139,8 @@ class FunKeyScreenModel : ScreenModel {
         val gameMode: String,
         val exportTimestamp: String,
         val participantData: FunKeyParticipantData,
-        val roundResults: FunKeyRoundResults
+        val roundResults: FunKeyRoundResults,
+        val roundLog: List<String>
     )
 
     @Serializable
@@ -209,6 +219,7 @@ class FunKeyScreenModel : ScreenModel {
         // React behavior: toggling Sweet Spot immediately adjusts score (+2/-2)
         _uiState.update { state ->
             val enabling = !state.sweetSpotOn
+            logEvent("Sweet Spot ${if (enabling) "activated" else "deactivated"}")
             val delta = if (enabling) 2 else -2
             state.copy(
                 sweetSpotOn = enabling,
@@ -219,8 +230,10 @@ class FunKeyScreenModel : ScreenModel {
     }
 
     fun toggleAllRollers() {
+        val newState = !_uiState.value.allRollers
+        logEvent("All Rollers ${if (newState) "enabled" else "disabled"}")
         _uiState.update { state ->
-            state.copy(allRollers = !state.allRollers)
+            state.copy(allRollers = newState)
         }
         persistState()
     }
@@ -240,6 +253,7 @@ class FunKeyScreenModel : ScreenModel {
      * - After any key click: switch back to "Purple" phase.
      */
     fun handleCatch(type: FunKeyZoneType, @Suppress("UNUSED_PARAMETER") points: Int, zone: String) {
+        logEvent("Button pressed: $zone")
         _uiState.update { state ->
              when (type) {
                  FunKeyZoneType.JUMP -> handleJumpCatchInternal(state, zone)
@@ -350,6 +364,8 @@ class FunKeyScreenModel : ScreenModel {
                 key4Count = 0
             )
         }
+        // Clear the participant log when resetting
+        _currentParticipantLog.value = emptyList()
         persistState()
     }
 
@@ -458,7 +474,8 @@ class FunKeyScreenModel : ScreenModel {
                     sweetSpot = if (state.sweetSpotOn) "Yes" else "No",
                     allRollers = if (state.allRollers) "Yes" else "No",
                     totalScore = state.score
-                )
+                ),
+                roundLog = _currentParticipantLog.value
             )
 
             _pendingJsonExport.value = PendingJsonExport(
@@ -494,6 +511,8 @@ class FunKeyScreenModel : ScreenModel {
                 key4Count = 0
             )
         }
+        // Clear the participant log for the next participant
+        _currentParticipantLog.value = emptyList()
         persistState()
     }
 

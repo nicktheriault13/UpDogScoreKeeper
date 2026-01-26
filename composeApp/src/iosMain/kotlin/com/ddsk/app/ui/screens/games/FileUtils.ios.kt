@@ -53,4 +53,8 @@ actual fun generateFunKeyXlsm(participants: List<FunKeyExportParticipant>, templ
 
 actual fun generateSpacedOutXlsx(participants: List<SpacedOutExportParticipant>, templateBytes: ByteArray): ByteArray = ByteArray(0)
 
+actual fun generateBoomXlsm(participants: List<BoomExportParticipant>, templateBytes: ByteArray): ByteArray = ByteArray(0)
+
+
+
 

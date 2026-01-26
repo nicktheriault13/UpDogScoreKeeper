@@ -51,6 +51,9 @@ import com.ddsk.app.ui.components.GameHomeButton
 import com.ddsk.app.ui.screens.games.ui.ButtonPalette
 import com.ddsk.app.ui.screens.timers.getTimerAssetForGame
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 private val successGreen = Color(0xFF00C853)
 private val warningOrange = Color(0xFFFF9100)
@@ -114,6 +117,9 @@ object BoomScreen : Screen {
             saveJsonFileWithPicker(pending.filename, pending.content)
             screenModel.consumePendingJsonExport()
         }
+
+        val assetLoader = rememberAssetLoader()
+        val fileExporter = rememberFileExporter()
 
         val filePicker = rememberFilePicker { result ->
             when (result) {
@@ -207,8 +213,68 @@ object BoomScreen : Screen {
                                 onImport = { filePicker.launch() },
                                 onAddTeam = { showAddParticipant = true },
                                 onExport = {
-                                    csvBuffer = screenModel.exportParticipantsAsCsv()
-                                    dialogState.value = BoomDialogState.Export
+                                    scope.launch {
+                                        val template = assetLoader.load("templates/UDC Boom Data Entry L1 Div Sort New.xlsm")
+                                        if (template == null) {
+                                            // Fallback to CSV if template is missing
+                                            csvBuffer = screenModel.exportParticipantsAsCsv()
+                                            dialogState.value = BoomDialogState.Export
+                                            return@launch
+                                        }
+
+                                        // Collect all participants with their stats
+                                        val allParticipants = buildList {
+                                            uiState.activeParticipant?.let {
+                                                add(it.copy(stats = BoomParticipantStats.fromScore(uiState.scoreBreakdown)))
+                                            }
+                                            addAll(uiState.queue.map { it.copy(stats = it.stats) })
+                                            addAll(uiState.completedParticipants)
+                                        }
+
+                                        // Filter to only participants with scoring data and convert to export format
+                                        val exportRows = allParticipants
+                                            .filter { p -> p.stats.totalScore > 0 || p.stats.buttonCounts.values.sum() > 0 }
+                                            .map { p ->
+                                                val counts = p.stats.buttonCounts
+                                                BoomExportParticipant(
+                                                    handler = p.handler,
+                                                    dog = p.dog,
+                                                    utn = p.utn,
+                                                    onePointCatches = counts["1"] ?: 0,
+                                                    twoPointCatches = (counts["2a"] ?: 0) + (counts["2b"] ?: 0),
+                                                    fivePointCatches = counts["5"] ?: 0,
+                                                    tenPointCatches = counts["10"] ?: 0,
+                                                    twentyPointCatches = counts["20"] ?: 0,
+                                                    twentyFivePointCatches = counts["25"] ?: 0,
+                                                    thirtyFivePointCatches = counts["35"] ?: 0,
+                                                    sweetSpot = if (p.stats.sweetSpotAwards > 0) "Y" else "N",
+                                                    totalScore = p.stats.totalScore,
+                                                    heightDivision = p.heightDivision
+                                                )
+                                            }
+
+                                        val bytes = generateBoomXlsm(exportRows, template)
+                                        if (bytes.isEmpty()) {
+                                            // Fallback to CSV if export fails
+                                            csvBuffer = screenModel.exportParticipantsAsCsv()
+                                            dialogState.value = BoomDialogState.Export
+                                        } else {
+                                            val now = kotlinx.datetime.Clock.System.now()
+                                                .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
+                                            fun pad2(n: Int) = n.toString().padStart(2, '0')
+                                            val stamp = buildString {
+                                                append(now.year)
+                                                append(pad2(now.monthNumber))
+                                                append(pad2(now.dayOfMonth))
+                                                append('_')
+                                                append(pad2(now.hour))
+                                                append(pad2(now.minute))
+                                                append(pad2(now.second))
+                                            }
+                                            val fileName = "Boom_Scores_${stamp}.xlsm"
+                                            fileExporter.save(fileName, bytes)
+                                        }
+                                    }
                                 },
                                 onLog = {
                                     val content = screenModel.exportLog()
