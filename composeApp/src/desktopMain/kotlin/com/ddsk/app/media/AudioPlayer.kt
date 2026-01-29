@@ -28,6 +28,7 @@ class DesktopAudioPlayer(fileName: String) : AudioPlayer {
     // On desktop, Dispatchers.Main might not be installed. Use Default for polling.
     private val scope = CoroutineScope(Dispatchers.Default + Job())
     private var timeUpdateJob: Job? = null
+    private val shouldUpdateTime = AtomicBoolean(false)
 
     private val _currentTime = MutableStateFlow(0)
     override val currentTime: StateFlow<Int> = _currentTime.asStateFlow()
@@ -83,6 +84,7 @@ class DesktopAudioPlayer(fileName: String) : AudioPlayer {
 
     override fun play() {
         val player = mediaPlayer ?: return
+        shouldUpdateTime.set(true)
         runOnFxThread {
             player.play()
         }
@@ -91,12 +93,14 @@ class DesktopAudioPlayer(fileName: String) : AudioPlayer {
 
     override fun pause() {
         val player = mediaPlayer ?: return
+        shouldUpdateTime.set(false)
         runOnFxThread { player.pause() }
         timeUpdateJob?.cancel()
     }
 
     override fun stop() {
         val player = mediaPlayer ?: return
+        shouldUpdateTime.set(false)
         runOnFxThread {
             player.stop()
         }
@@ -116,7 +120,7 @@ class DesktopAudioPlayer(fileName: String) : AudioPlayer {
     private fun startTimeUpdates() {
         timeUpdateJob?.cancel()
         timeUpdateJob = scope.launch {
-            while (isPlaying) {
+            while (shouldUpdateTime.get()) {
                 val ms = mediaPlayer
                     ?.currentTime
                     ?.toMillis()

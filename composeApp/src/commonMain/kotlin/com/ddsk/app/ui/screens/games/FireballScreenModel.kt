@@ -13,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
@@ -69,6 +70,13 @@ class FireballScreenModel : ScreenModel {
 
     private val _fireballZones = MutableStateFlow<Set<FireballGridPoint>>(emptySet())
     val fireballZones: StateFlow<Set<FireballGridPoint>> = _fireballZones.asStateFlow()
+
+    // Undo stack: stores board state snapshots
+    private data class BoardSnapshot(
+        val clickedZones: Set<FireballGridPoint>,
+        val fireballZones: Set<FireballGridPoint>
+    )
+    private val undoStack = ArrayDeque<BoardSnapshot>()
 
     private val _isFireballActive = MutableStateFlow(false)
     val isFireballActive: StateFlow<Boolean> = _isFireballActive.asStateFlow()
@@ -261,16 +269,57 @@ class FireballScreenModel : ScreenModel {
 
     // ---- Board / scoring ----
 
+    private fun pushUndo() {
+        val snapshot = BoardSnapshot(
+            clickedZones = _clickedZones.value,
+            fireballZones = _fireballZones.value
+        )
+        undoStack.add(snapshot)
+        if (undoStack.size > 50) {
+            undoStack.removeAt(0)
+        }
+    }
+
+    fun undo() {
+        if (undoStack.isEmpty()) {
+            sidebarMessage.value = "Nothing to undo"
+            return
+        }
+
+        val snapshot = undoStack.removeAt(undoStack.lastIndex)
+        // Force state update with sentinel values to ensure desktop recomposition
+        val sentinelPoint = FireballGridPoint(-1, -1)
+        _clickedZones.value = setOf(sentinelPoint)
+        _fireballZones.value = setOf(sentinelPoint)
+
+        // Now restore the snapshot
+        _clickedZones.value = snapshot.clickedZones
+        _fireballZones.value = snapshot.fireballZones
+
+        recomputeScores()
+        logEvent("Undo")
+        persistState()
+    }
+
     fun clearBoard() {
         logEvent("Clear Board")
+        undoStack.clear()
         clearBoardInternal(resetFireballMode = true)
         recomputeScores()
         persistState()
     }
 
     private fun clearBoardInternal(resetFireballMode: Boolean = true) {
+        // Force state updates to trigger recomposition on desktop
+        // Set to sentinel values first, then clear
+        val sentinelPoint = FireballGridPoint(-1, -1)
+        _clickedZones.value = setOf(sentinelPoint)
+        _fireballZones.value = setOf(sentinelPoint)
+
+        // Now clear to empty
         _clickedZones.value = emptySet()
         _fireballZones.value = emptySet()
+
         if (resetFireballMode) {
             _isFireballActive.value = false
         }
@@ -279,6 +328,10 @@ class FireballScreenModel : ScreenModel {
 
     fun handleZoneClick(row: Int, col: Int) {
         val value = zoneValue(row, col) ?: return
+
+        // Push current state to undo stack before making changes
+        pushUndo()
+
         logEvent("Zone $value")
         val point = FireballGridPoint(row, col)
 

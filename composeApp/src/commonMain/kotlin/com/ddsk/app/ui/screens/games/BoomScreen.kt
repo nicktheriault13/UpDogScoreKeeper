@@ -81,7 +81,7 @@ private fun scoringPaletteFor(
 ): ButtonPalette {
     return when {
         clicked -> ButtonPalette(successGreen, Color.White)
-        enabled -> scoringBasePalette[button] ?: ButtonPalette(Color(0xFF2979FF), Color.White)
+        enabled -> ButtonPalette(boomPink, Color.White)
         else -> ButtonPalette(disabledBackground, disabledContent)
     }
 }

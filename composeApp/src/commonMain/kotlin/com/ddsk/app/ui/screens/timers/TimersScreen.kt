@@ -219,6 +219,7 @@ private fun NowPlayingCard(
     isPhone: Boolean,
 ) {
     val progress = if (durationMillis > 0) currentTimeMillis / durationMillis.toFloat() else 0f
+    val remainingMillis = (durationMillis - currentTimeMillis).coerceAtLeast(0)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -229,12 +230,18 @@ private fun NowPlayingCard(
             Text("Playing: $gameName", color = Palette.onSurface, style = MaterialTheme.typography.subtitle1)
             Spacer(Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatTime(currentTimeMillis), color = Palette.onSurface, style = MaterialTheme.typography.h6)
-                Text(
-                    text = if (durationMillis > 0) formatTime(durationMillis) else "--:--",
-                    color = Palette.onSurfaceVariant,
-                    style = MaterialTheme.typography.body2
-                )
+                Column {
+                    Text(formatTime(remainingMillis), color = Palette.onSurface, style = MaterialTheme.typography.h6)
+                    Text("Time Remaining", color = Palette.onSurfaceVariant, style = MaterialTheme.typography.caption)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = if (durationMillis > 0) formatTime(durationMillis) else "--:--",
+                        color = Palette.onSurfaceVariant,
+                        style = MaterialTheme.typography.body2
+                    )
+                    Text("Total Duration", color = Palette.onSurfaceVariant, style = MaterialTheme.typography.caption)
+                }
             }
             Spacer(Modifier.height(8.dp))
             LinearProgressIndicator(progress = progress.coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth())

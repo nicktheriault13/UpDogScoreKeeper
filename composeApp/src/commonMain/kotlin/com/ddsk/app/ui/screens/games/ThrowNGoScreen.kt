@@ -367,8 +367,7 @@ object ThrowNGoScreen : Screen {
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            // Call reset round function when implemented
-                            // screenModel.resetRound()
+                            screenModel.resetRound()
                             showResetRoundDialog = false
                         }
                     ) {

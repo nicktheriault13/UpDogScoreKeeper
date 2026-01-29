@@ -77,7 +77,7 @@ data class FarOutState(
     val activeIndex: Int = 0,
     val throwInputs: ThrowInputs = ThrowInputs("", "", "", ""),
     val missStates: MissStates = MissStates(false, false, false, false),
-    val sweetShotDeclined: Boolean = false,
+    val sweetShotDeclined: Boolean = true, // Default to declined
     val allRollersPressed: Boolean = false,
     val sweetShotEditable: Boolean = true,
     val score: Double = 0.0,
@@ -197,8 +197,12 @@ class FarOutScreenModel(
                 "Throw 3" -> current.throwInputs.copy(throw3 = rounded)
                 else -> current.throwInputs.copy(sweetShot = rounded)
             }
-            val updatedScore = calculateScore(updatedInputs, current.missStates, current.sweetShotDeclined)
-            current.copy(throwInputs = updatedInputs, score = updatedScore)
+
+            // If entering a value for Sweet Shot, automatically un-decline it
+            val updatedDeclined = if (label == "Sweet Shot" && rounded.isNotBlank()) false else current.sweetShotDeclined
+
+            val updatedScore = calculateScore(updatedInputs, current.missStates, updatedDeclined)
+            current.copy(throwInputs = updatedInputs, sweetShotDeclined = updatedDeclined, score = updatedScore)
         }
         logEvent("Input $label set to $rounded")
     }
@@ -212,8 +216,12 @@ class FarOutScreenModel(
                 "Throw 3" -> current.missStates.copy(throw3Miss = !current.missStates.throw3Miss)
                 else -> current.missStates.copy(sweetShotMiss = !current.missStates.sweetShotMiss)
             }
-            val updatedScore = calculateScore(current.throwInputs, updatedMiss, current.sweetShotDeclined)
-            current.copy(missStates = updatedMiss, score = updatedScore)
+
+            // If clicking miss for Sweet Shot, automatically un-decline it
+            val updatedDeclined = if (label == "Sweet Shot") false else current.sweetShotDeclined
+
+            val updatedScore = calculateScore(current.throwInputs, updatedMiss, updatedDeclined)
+            current.copy(missStates = updatedMiss, sweetShotDeclined = updatedDeclined, score = updatedScore)
         }
         logEvent("Miss toggled on $label")
     }
@@ -245,7 +253,7 @@ class FarOutScreenModel(
             current.copy(
                 throwInputs = ThrowInputs("", "", "", ""),
                 missStates = MissStates(false, false, false, false),
-                sweetShotDeclined = false,
+                sweetShotDeclined = true, // Default to declined
                 allRollersPressed = false,
                 score = 0.0
             )
@@ -310,7 +318,7 @@ class FarOutScreenModel(
                 activeIndex = 0,
                 throwInputs = ThrowInputs("", "", "", ""),
                 missStates = MissStates(false, false, false, false),
-                sweetShotDeclined = false,
+                sweetShotDeclined = true, // Default to declined
                 allRollersPressed = false,
                 score = 0.0,
                 participantCountWithoutScores = rotated.count { !hasScoringData(it) }

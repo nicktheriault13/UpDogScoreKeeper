@@ -224,7 +224,7 @@ object FireballScreen : Screen {
                         boardScore = currentBoardScore,
                         onAllRollers = screenModel::toggleAllRollers,
                         allRollersActive = allRollersActive,
-                        onClearBoard = screenModel::clearBoard,
+                        onClearBoard = screenModel::undo,
                         onToggleFireball = screenModel::toggleFireball,
                         isFireballActive = isFireballActive,
                         onToggleSweetSpot = screenModel::toggleManualSweetSpot,

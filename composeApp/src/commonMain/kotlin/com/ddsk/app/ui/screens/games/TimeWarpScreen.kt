@@ -173,6 +173,7 @@ object TimeWarpScreen : Screen {
                         onAllRollersClick = { screenModel.toggleAllRollers() },
                         timeRemaining = timeRemaining,
                         isTimerRunning = isTimerRunning,
+                        clickedZones = clickedZones,
                         onStartStopCountdown = {
                             if (isTimerRunning) screenModel.stopCountdownAndAddScore() else screenModel.startCountdown()
                         },
@@ -528,10 +529,19 @@ private fun TimeWarpHeaderCard(
     onAllRollersClick: () -> Unit,
     timeRemaining: Float,
     isTimerRunning: Boolean,
+    clickedZones: Set<Int>,
     onStartStopCountdown: () -> Unit,
     onLongPressStart: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Calculate if Complete button should be shown
+    // Don't show if timer hasn't been started yet (timeRemaining == 60s)
+    val showCompleteButton = !isTimerRunning &&
+                             timeRemaining > 0 &&
+                             timeRemaining < 60f &&
+                             clickedZones.contains(1) &&
+                             clickedZones.contains(2) &&
+                             clickedZones.contains(3)
     Card(shape = RoundedCornerShape(12.dp), elevation = 4.dp, modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth().fillMaxHeight().padding(14.dp),
@@ -563,41 +573,42 @@ private fun TimeWarpHeaderCard(
                     )
                 }
 
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Button(
+                    onClick = onUndo,
+                    enabled = canUndo,
+                    colors = androidx.compose.material.ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFFD50000),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.width(140.dp).height(38.dp)
                 ) {
+                    Text("UNDO", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+            }
+
+            // Column 2: TIME WARP COMPLETED button (when shown) and MISS/OB buttons at bottom
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                // TIME WARP COMPLETED button at top (twice as tall as MISS button)
+                if (showCompleteButton) {
                     Button(
                         onClick = { /* Time Warp Completed */ },
                         colors = androidx.compose.material.ButtonDefaults.buttonColors(
                             backgroundColor = Color(0xFF6750A4),
                             contentColor = Color.White
                         ),
-                        modifier = Modifier.width(140.dp).height(38.dp),
+                        modifier = Modifier.fillMaxWidth().height(80.dp),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("TIME WARP\nCOMPLETED", fontWeight = FontWeight.Bold, fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp)
+                        Text("TIME WARP\nCOMPLETED", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center, lineHeight = 14.sp)
                     }
-
-                    Button(
-                        onClick = onUndo,
-                        enabled = canUndo,
-                        colors = androidx.compose.material.ButtonDefaults.buttonColors(
-                            backgroundColor = Color(0xFFD50000),
-                            contentColor = Color.White
-                        ),
-                        modifier = Modifier.width(140.dp).height(38.dp)
-                    ) {
-                        Text("UNDO", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    }
+                } else {
+                    // Empty spacer when button is not shown to maintain layout
+                    Spacer(modifier = Modifier.height(0.dp))
                 }
-            }
 
-            // Column 2: MISS and OB buttons at bottom
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                verticalArrangement = Arrangement.Bottom
-            ) {
                 // MISS and OB buttons at bottom in same row
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),

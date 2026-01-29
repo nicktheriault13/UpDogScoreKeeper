@@ -27,7 +27,7 @@ val SharedTimerGames = listOf(
     TimerGameDef("4-Way Play", SingleAsset(DEFAULT_TIMER_ASSET)),
     TimerGameDef("7-Up", SingleAsset(DEFAULT_TIMER_ASSET)),
     TimerGameDef("Boom", SingleAsset("assets/audio/Boom Timer 60 sec.mp3")),
-    TimerGameDef("Far Out", SingleAsset(DEFAULT_TIMER_ASSET)),
+    TimerGameDef("Far Out", SingleAsset("assets/audio/90Seconds_FS original CE.mp3")),
     TimerGameDef(
         "Fire Ball",
         RandomAsset(

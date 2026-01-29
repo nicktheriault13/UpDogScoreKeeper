@@ -669,19 +669,19 @@ private fun GreedyScoringCard(
                 )
             }
 
-            // When flipped, reverse the row order for the display (top becomes bottom)
-            // but we need to maintain the actual row indices for button positioning
+            // When flipped, reverse both the row order AND column order for display
             val displayRowOrder = if (fieldFlipped) listOf(2, 1, 0) else listOf(0, 1, 2)
+            val displayColOrder = if (fieldFlipped) listOf(5, 4, 3, 2, 1) else listOf(1, 2, 3, 4, 5)
 
-            displayRowOrder.forEach { displayRowIndex ->
+            displayRowOrder.forEachIndexed { visualIndex, actualRow ->
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth().weight(if (displayRowIndex == 1) 1.5f else 1f)
+                    modifier = Modifier.fillMaxWidth().weight(if (actualRow == 1) 1.5f else 1f)
                 ) {
-                    for (colIndex in 1..5) {
+                    for (actualCol in displayColOrder) {
                         when {
-                            // <-Next button ALWAYS in ACTUAL middle row (row 1), column 1 - unaffected by flip
-                            displayRowIndex == 1 && colIndex == 1 -> {
+                            // <-Next button in middle row, column 1
+                            actualRow == 1 && actualCol == 1 -> {
                                 Button(
                                     onClick = onNextThrowZoneCounterClockwise,
                                     enabled = throwZone < 4 && anyButtonClicked && !isCounterClockwiseDisabled,
@@ -695,8 +695,8 @@ private fun GreedyScoringCard(
                                     Text("<-Next", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
                             }
-                            // Sweet Spot ALWAYS in ACTUAL middle row (row 1), column 3 - unaffected by flip
-                            displayRowIndex == 1 && colIndex == 3 -> {
+                            // Sweet Spot in middle row, column 3
+                            actualRow == 1 && actualCol == 3 -> {
                                 val clickedSweetSpot = "Sweet Spot" in activeButtons
                                 val enabledSweetSpot = !(throwZone == 4 && "Sweet Spot" in activeButtons)
                                 Button(
@@ -711,8 +711,8 @@ private fun GreedyScoringCard(
                                     Text("Sweet Spot", fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                                 }
                             }
-                            // Next-> button ALWAYS in ACTUAL middle row (row 1), column 5 - unaffected by flip
-                            displayRowIndex == 1 && colIndex == 5 -> {
+                            // Next-> button in middle row, column 5
+                            actualRow == 1 && actualCol == 5 -> {
                                 Button(
                                     onClick = onNextThrowZoneClockwise,
                                     enabled = throwZone < 4 && anyButtonClicked && !isClockwiseDisabled,
@@ -728,15 +728,8 @@ private fun GreedyScoringCard(
                             }
                             // Regular scoring buttons (X, Y, Z) - these ARE affected by flip
                             else -> {
-                                // Map the display row back to the actual button position row for lookup
-                                val actualRowForButtonLookup = if (fieldFlipped) {
-                                    // When flipped, invert the row index for button positions
-                                    2 - displayRowIndex
-                                } else {
-                                    displayRowIndex
-                                }
-
-                                val buttonAtPos = buttonPositions.find { it.row == actualRowForButtonLookup && it.col == colIndex }
+                                // For X, Y, Z buttons, use the actual row and column positions
+                                val buttonAtPos = buttonPositions.find { it.row == actualRow && it.col == actualCol }
                                 if (buttonAtPos != null) {
                                     val clicked = buttonAtPos.label in activeButtons
                                     val enabled = !(throwZone == 4 && "Sweet Spot" in activeButtons)

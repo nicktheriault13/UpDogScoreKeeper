@@ -196,7 +196,8 @@ class SpacedOutScreenModel : ScreenModel {
                  zonesCaught = newZonesCaught,
                  spacedOutCount = newSpacedOutCount,
                  clickedZones = if (allZonesClicked) emptySet() else newClickedZones,
-                 lastZoneClicked = if (allZonesClicked) null else zone
+                 // Keep track of last zone clicked even after Spaced Out to prevent immediate re-click
+                 lastZoneClicked = zone
              )
          }
 

@@ -113,6 +113,9 @@ class SevenUpScreenModel : ScreenModel {
 
     enum class ImportMode { Add, ReplaceAll }
 
+    // Undo stack to track state history
+    private val undoStack = ArrayDeque<SevenUpUiState>()
+
     private val _uiState = MutableStateFlow(SevenUpUiState())
     val uiState = _uiState.asStateFlow()
 
@@ -263,6 +266,7 @@ class SevenUpScreenModel : ScreenModel {
     }
 
     fun setAllRollers(enabled: Boolean) {
+        pushUndo()
         _uiState.update { it.copy(allRollers = enabled) }
         logEvent(if (enabled) "All Rollers enabled" else "All Rollers disabled")
         persistState()
@@ -434,7 +438,25 @@ class SevenUpScreenModel : ScreenModel {
     }
 
     fun undo() {
-        logEvent("Undo Request (Not Implemented)")
+        if (undoStack.isEmpty()) {
+            logEvent("Undo: Nothing to undo")
+            return
+        }
+
+        // Restore the last saved state
+        val previousState = undoStack.removeAt(undoStack.lastIndex)
+        _uiState.value = previousState
+        logEvent("Undo: State restored")
+        persistState()
+    }
+
+    private fun pushUndo() {
+        // Save current state to undo stack before making changes
+        undoStack.add(_uiState.value)
+        // Limit stack size to prevent memory issues
+        if (undoStack.size > 200) {
+            undoStack.removeAt(0)
+        }
     }
 
     fun toggleGridVersion() {
@@ -501,6 +523,7 @@ class SevenUpScreenModel : ScreenModel {
 
         if (jumpId != null) {
             if (!_uiState.value.hasStarted) {
+                pushUndo()
                 _uiState.update { state ->
                     state.copy(
                         hasStarted = true,
@@ -520,6 +543,7 @@ class SevenUpScreenModel : ScreenModel {
             if (jumpId in _uiState.value.disabledJumps) return
             if (_uiState.value.jumpStreak >= 3) return
 
+            pushUndo()
             _uiState.update { state ->
                 state.copy(
                     jumpStreak = state.jumpStreak + 1,
@@ -541,6 +565,7 @@ class SevenUpScreenModel : ScreenModel {
         if (cellKey in _uiState.value.markedCells) return
         if (_uiState.value.nonJumpMark > 5) return
 
+        pushUndo()
         _uiState.update { state ->
             val isFifthMark = state.nonJumpMark == 5
             val isSweetSpotFifth = isFifthMark && label == "Sweet Spot"
@@ -688,6 +713,7 @@ class SevenUpScreenModel : ScreenModel {
                 )
             }
         }
+        undoStack.clear()
         resetRoundStateOnly()
         setAllRollers(false)
         logEvent("Next")
@@ -696,6 +722,7 @@ class SevenUpScreenModel : ScreenModel {
 
     /** Reset only the current round state (score/timer/grid marks) for the current active participant. */
     fun resetCurrentRound() {
+        undoStack.clear()
         resetRoundStateOnly()
         logEvent("Round reset")
         persistState()

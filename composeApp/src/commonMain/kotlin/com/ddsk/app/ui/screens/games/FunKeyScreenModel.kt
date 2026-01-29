@@ -89,6 +89,9 @@ class FunKeyScreenModel : ScreenModel {
         super.onDispose()
     }
 
+    // Undo stack to track state history
+    private val undoStack = ArrayDeque<FunKeyUiState>()
+
     private val _uiState = MutableStateFlow(FunKeyUiState())
 
     // Derived StateFlows compatible with previous UI consumption
@@ -217,6 +220,7 @@ class FunKeyScreenModel : ScreenModel {
 
     fun toggleSweetSpot() {
         // React behavior: toggling Sweet Spot immediately adjusts score (+2/-2)
+        pushUndo()
         _uiState.update { state ->
             val enabling = !state.sweetSpotOn
             logEvent("Sweet Spot ${if (enabling) "activated" else "deactivated"}")
@@ -230,6 +234,7 @@ class FunKeyScreenModel : ScreenModel {
     }
 
     fun toggleAllRollers() {
+        pushUndo()
         val newState = !_uiState.value.allRollers
         logEvent("All Rollers ${if (newState) "enabled" else "disabled"}")
         _uiState.update { state ->
@@ -239,6 +244,7 @@ class FunKeyScreenModel : ScreenModel {
     }
 
     fun incrementMisses() {
+        pushUndo()
         _uiState.update { it.copy(misses = it.misses + 1) }
         persistState()
     }
@@ -253,6 +259,7 @@ class FunKeyScreenModel : ScreenModel {
      * - After any key click: switch back to "Purple" phase.
      */
     fun handleCatch(type: FunKeyZoneType, @Suppress("UNUSED_PARAMETER") points: Int, zone: String) {
+        pushUndo()
         logEvent("Button pressed: $zone")
         _uiState.update { state ->
              when (type) {
@@ -343,6 +350,7 @@ class FunKeyScreenModel : ScreenModel {
 
     fun reset() {
         // React resetScore resets all per-run scoring state + gating
+        undoStack.clear()
         _uiState.update {
             it.copy(
                 score = 0,
@@ -369,28 +377,23 @@ class FunKeyScreenModel : ScreenModel {
         persistState()
     }
 
-    fun undo() {
-        // Simple undo: reset the current round state but keep participants
-        _uiState.update {
-            it.copy(
-                score = 0,
-                sweetSpotOn = false,
-                allRollers = false,
-                activatedKeys = emptySet(),
-                isPurpleEnabled = true,
-                isBlueEnabled = false,
-                jump1Count = 0,
-                jump2Count = 0,
-                jump3Count = 0,
-                jump2bCount = 0,
-                jump3bCount = 0,
-                tunnelCount = 0,
-                key1Count = 0,
-                key2Count = 0,
-                key3Count = 0,
-                key4Count = 0
-            )
+    private fun pushUndo() {
+        // Save current state to undo stack
+        undoStack.add(_uiState.value)
+        // Limit stack size to prevent memory issues
+        if (undoStack.size > 200) {
+            undoStack.removeAt(0)
         }
+    }
+
+    fun undo() {
+        if (undoStack.isEmpty()) {
+            return
+        }
+
+        // Restore the last saved state
+        val previousState = undoStack.removeAt(undoStack.lastIndex)
+        _uiState.value = previousState
         persistState()
     }
 
