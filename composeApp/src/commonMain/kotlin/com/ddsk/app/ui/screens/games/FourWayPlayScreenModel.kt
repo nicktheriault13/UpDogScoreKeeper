@@ -2,6 +2,9 @@ package com.ddsk.app.ui.screens.games
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import com.ddsk.app.persistence.DataStore
+import com.ddsk.app.network.ApiClient
+import com.ddsk.app.network.ApiConfig
+import com.ddsk.app.network.getNetworkConnectivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +23,10 @@ import kotlinx.datetime.toLocalDateTime
 class FourWayPlayScreenModel : ScreenModel {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // API client for posting data to DB
+    private val apiClient = ApiClient(baseUrl = "https://your-api-endpoint.com")
+    private val networkConnectivity = try { getNetworkConnectivity() } catch (e: Exception) { null }
 
     override fun onDispose() {
         scope.cancel()
@@ -190,6 +197,27 @@ class FourWayPlayScreenModel : ScreenModel {
         val misses: Int
     )
 
+    // Supabase-compatible data class with snake_case field names
+    @Serializable
+    private data class SupabaseGameData(
+        val game_mode: String,
+        val export_timestamp: String,
+        val handler: String,
+        val dog: String,
+        val utn: String,
+        val completed_at: String,
+        val zone1_catches: Int,
+        val zone2_catches: Int,
+        val zone3_catches: Int,
+        val zone4_catches: Int,
+        val sweet_spot: Boolean,
+        val all_rollers: Boolean,
+        val total_score: Int,
+        val misses: Int,
+        val round_log: List<String>,
+        val height_division: String
+    )
+
     private fun fourWayPlayTimestamp(now: kotlinx.datetime.LocalDateTime): String {
         fun pad2(n: Int) = n.toString().padStart(2, '0')
         return buildString {
@@ -293,6 +321,7 @@ class FourWayPlayScreenModel : ScreenModel {
             val stamp = fourWayPlayTimestamp(now)
             val filename = "4WayPlay_${safeNamePart(updatedCurrent.handler, "Handler")}_${safeNamePart(updatedCurrent.dog, "Dog")}_${stamp}.json"
 
+            // Create standard export format for file saving
             val exportData = FourWayPlayRoundExport(
                 gameMode = "4-Way Play",
                 exportTimestamp = Clock.System.now().toString(),
@@ -314,10 +343,57 @@ class FourWayPlayScreenModel : ScreenModel {
                 roundLog = _currentParticipantLog.value
             )
 
+            val jsonContent = exportJson.encodeToString(exportData)
+
             _pendingJsonExport.value = PendingJsonExport(
                 filename = filename,
-                content = exportJson.encodeToString(exportData)
+                content = jsonContent
             )
+
+            // Post to API if enabled and internet is available
+            scope.launch {
+                try {
+                    if (!ApiConfig.ENABLED) {
+                        // API posting is disabled
+                        return@launch
+                    }
+
+                    val isConnected = networkConnectivity?.isConnected() ?: false
+
+                    if (isConnected) {
+                        // Create database-compatible JSON format
+                        val supabaseData = SupabaseGameData(
+                            game_mode = "4-Way Play",
+                            export_timestamp = Clock.System.now().toString(),
+                            handler = updatedCurrent.handler,
+                            dog = updatedCurrent.dog,
+                            utn = updatedCurrent.utn,
+                            completed_at = now.toString(),
+                            zone1_catches = updatedCurrent.zone1Catches,
+                            zone2_catches = updatedCurrent.zone2Catches,
+                            zone3_catches = updatedCurrent.zone3Catches,
+                            zone4_catches = updatedCurrent.zone4Catches,
+                            sweet_spot = updatedCurrent.sweetSpot,
+                            all_rollers = updatedCurrent.allRollers,
+                            total_score = updatedCurrent.score,
+                            misses = updatedCurrent.misses,
+                            round_log = _currentParticipantLog.value,
+                            height_division = updatedCurrent.heightDivision
+                        )
+
+                        val supabaseJson = exportJson.encodeToString(supabaseData)
+                        val result = apiClient.postJson(ApiConfig.FOURWAY_ENDPOINT, supabaseJson)
+
+                        if (result.isSuccess) {
+                            recordSidebarAction("Data uploaded to database")
+                        } else {
+                            recordSidebarAction("Upload failed: ${result.exceptionOrNull()?.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Silently fail - API is optional
+                }
+            }
         }
 
         if (updatedCurrent.hasScore) {
